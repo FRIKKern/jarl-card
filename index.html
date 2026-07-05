@@ -413,7 +413,9 @@ function spawnBolt(mega, at) {
       startRow = 0;
     }
   }
-  const endRow = Math.floor(ROWS * ((mega ? 0.75 : 0.62) + Math.random() * (mega ? 0.23 : 0.34)));
+  let endRow = Math.floor(ROWS * ((mega ? 0.75 : 0.62) + Math.random() * (mega ? 0.23 : 0.34)));
+  if (at) // pressed origins can sit low — always leave the bolt room to travel
+    endRow = Math.min(ROWS - 2, Math.max(endRow, startRow + 6 + Math.floor(Math.random() * 8)));
   // text box in grid coords: bolts steer around it, never get clipped by it
   const z = ZONE ? {
     x0: (ZONE.x0 - 0.03) * COLS, x1: (ZONE.x1 + 0.03) * COLS,
@@ -499,6 +501,9 @@ function drawFrame(t) {
   // a strike lights the WHOLE cloud deck a little (uniform ambient), on top of
   // the proximity falloff that lights it far more near the bolt itself
   const AMBIENT = Math.min(0.09, 0.13 * totalGlow);
+  // the cursor's charge: a small breathing light — local glow only, so it is
+  // added AFTER totalGlow and never lifts the whole deck
+  if (!INVERT && MX >= 0) lights.push(MX, MY, 0.20 + 0.05 * Math.sin(t * 2.3), 0.75);
   function lumAt(col, row) { // lightning glow reaching this cell
     let lum = 0;
     for (let L = 0; L < lights.length; L += 4) {
@@ -523,8 +528,10 @@ function drawFrame(t) {
     const base = deck * 4 + idx;
     // lightning adds light ON TOP of the cloud's own shade: AMBIENT lifts the
     // whole deck, lumAt ramps it toward the strike — brighter cloud + more
-    // light = brighter still, so shading structure is preserved, not flattened
-    const lum = lumAt(col, row) + AMBIENT;
+    // light = brighter still, so shading structure is preserved, not flattened.
+    // Scaled by the deck's z-depth gain (p[8]): near decks catch the light
+    // hard, far decks barely — the same parallax rule as the vortex glow.
+    const lum = (lumAt(col, row) + AMBIENT) * DK[deck][8];
     if (lum > 0.04) {
       const litLum = Math.min(205, CLOUD_LUM[base] + Math.min(1, lum) * 165);
       const lv = clamp(Math.round((litLum - 34) / (205 - 34) * (LITN - 1)), 0, LITN - 1);
@@ -684,28 +691,25 @@ function loop(now) {
 const strikeEl = document.getElementById('strike');
 strikeEl.addEventListener('click', () => { if (!INVERT) spawnBolt(true); });
 
-// press a cloud and it shoots lightning: verify there is VISIBLE cloud near
-// the tap, walk down that column to the cloud base, and strike from there.
-// Pressing bare sky does nothing — only clouds carry charge.
+// press ANYWHERE and lightning discharges from that exact point — the whole
+// sky is charged, not just the clouds
 canvas.addEventListener('click', e => {
   if (INVERT) return;
   const rect = canvas.getBoundingClientRect();
   const col = Math.round((e.clientX - rect.left) / cellW);
   const row = Math.round((e.clientY - rect.top) / cellH);
-  let bestCol = null, bestV = 0.03;
-  for (let dc = -5; dc <= 5; dc++) {
-    for (let dr = -3; dr <= 3; dr++) {
-      const v = visibleCloudAt(col + dc, row + dr);
-      if (v > bestV) { bestV = v; bestCol = col + dc; }
-    }
-  }
-  if (bestCol === null) return;
-  let base = row;
-  for (let rw = Math.floor(ROWS * 0.55); rw >= row; rw--) {
-    if (visibleCloudAt(bestCol, rw) > 0.035) { base = rw; break; }
-  }
-  spawnBolt(false, { col: bestCol, row: Math.max(0, base - 2) });
+  spawnBolt(false, { col: clamp(col, 1, COLS - 2), row: Math.max(0, row - 1) });
 });
+
+// the cursor itself is a charge: clouds near it glow softly, breathing a
+// little — it rides the same light system as the lightning
+let MX = -1, MY = -1;
+canvas.addEventListener('mousemove', e => {
+  const rect = canvas.getBoundingClientRect();
+  MX = (e.clientX - rect.left) / cellW;
+  MY = (e.clientY - rect.top) / cellH;
+});
+canvas.addEventListener('mouseleave', () => { MX = MY = -1; });
 
 // typewriter: the role line slowly loses its composure, then repeats.
 // updateZone() after every character so the storm keeps dodging the text.
