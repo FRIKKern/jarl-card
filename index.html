@@ -498,6 +498,7 @@ function spawnSheet() {
 let t = 0, emaMs = 0;
 function drawFrame(t) {
   SKY_CHARGE = stormIntensity(t + 1.1); // sky charges ~1s AHEAD of the discharge → anticipation
+  BUZZ = 0.78 + 0.32 * Math.random();   // the cursor's electric flicker, shared by spot + trail
   const buckets = Array.from({ length: N }, () => []);
   const dust = [];
   const clouds = Array.from({ length: CBASE + LITN }, () => []);
@@ -551,12 +552,18 @@ function drawFrame(t) {
         else lum += 0.4 * glow * spread / (1 + 0.75 * Math.abs(dz));                        // 2. lit body
       }
     }
-    // hovered cloud: a steady ~10% lift on the deck under the cursor, local
-    // to the blob — the "this one is armed" signal
-    if (deck === HOVER_DECK) {
-      const dxh = (col - MX) / COLS, dyv = (row - MY) / ROWS;
-      const hh = (dxh / 0.14) ** 2 + (dyv / 0.16) ** 2;
-      if (hh < 9) lum += 0.10 * Math.exp(-hh);
+    // hovered cloud: a TIGHT, potent electric spotlight — small and precise,
+    // buzzing (per-frame flicker), with a motion-blur trail that fades and
+    // widens slightly behind the cursor's path
+    for (let s = 0; s < TRAIL.length; s += 3) {
+      if (TRAIL[s + 2] !== deck) continue;
+      const k = s / 3;
+      const str = 0.34 * BUZZ * Math.pow(0.7, k);
+      if (str < 0.03) break;
+      const rr = 1 + 0.10 * k; // older samples spread: the blur
+      const dxh = (col - TRAIL[s]) / COLS, dyv = (row - TRAIL[s + 1]) / ROWS;
+      const hh = (dxh / (0.032 * rr)) ** 2 + (dyv / (0.042 * rr)) ** 2;
+      if (hh < 9) lum += str * Math.exp(-hh);
     }
     if (lum > 0.035 || lum < -0.035) {
       const litLum = clamp(Math.round(CLOUD_LUM[base] + clamp(lum, -1, 1) * 165), 8, 205);
@@ -682,6 +689,21 @@ function drawFrame(t) {
     }
   }
   // dark mode: white sky-flash. light mode: the paper darkens as the bolt discharges.
+  // the cursor tip itself: tiny crackle glyphs jittering at the point (the
+  // static-electric buzz), plus fading embers along the recent path
+  if (!INVERT && MX >= 0) {
+    for (let s = 0; s < 3; s++) {
+      ctx.fillStyle = g(120 + Math.floor(Math.random() * 135));
+      ctx.fillText('·+*x'[Math.floor(Math.random() * 4)],
+        (MX + (Math.random() - 0.5) * 2.2) * cellW,
+        (MY + (Math.random() - 0.5) * 2.2) * cellH);
+    }
+    for (let s = 3; s < Math.min(TRAIL.length, 15); s += 3) {
+      if (Math.random() < 0.5) continue;
+      ctx.fillStyle = g(Math.round(140 * Math.pow(0.7, s / 3)));
+      ctx.fillText('·', TRAIL[s] * cellW, TRAIL[s + 1] * cellH);
+    }
+  }
   flashEl.style.opacity = flash > 0.02 ? ((INVERT ? 0.16 : 0.22) * flash).toFixed(3) : 0;
 }
 
@@ -717,6 +739,11 @@ function loop(now) {
   for (let i = bolts.length - 1; i >= 0; i--) {
     if (++bolts[i].age >= bolts[i].life) bolts.splice(i, 1);
   }
+  // sample the cursor path for the electric trail (with a static-y jitter)
+  if (!INVERT && MX >= 0) {
+    TRAIL.unshift(MX + (Math.random() - 0.5) * 0.7, MY + (Math.random() - 0.5) * 0.7, HOVER_DECK);
+    if (TRAIL.length > 24) TRAIL.length = 24;
+  } else if (TRAIL.length) TRAIL.length = 0;
   if (shake > 0) { // a jolt through the storm on strike
     shake--;
     canvas.style.transform = shake
@@ -743,6 +770,7 @@ canvas.addEventListener('click', e => {
 
 // cursor tracking for the hover highlight; crosshair only when a cloud is armed
 let MX = -1, MY = -1, HOVER_DECK = -1;
+let TRAIL = [], BUZZ = 1; // recent cursor samples [x, y, deck, ...] for the blur trail
 canvas.addEventListener('mousemove', e => {
   const rect = canvas.getBoundingClientRect();
   MX = (e.clientX - rect.left) / cellW;
