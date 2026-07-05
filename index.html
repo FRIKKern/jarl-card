@@ -822,7 +822,8 @@ canvas.addEventListener('click', e => {
   spawnBolt(false, { col, row: Math.max(0, row - 1) });
 });
 
-// cursor tracking for the hover highlight; crosshair only when a cloud is armed
+// cursor tracking for the hover highlight; over an armed cloud the OS cursor
+// vanishes entirely — the electric spotlight + crackle IS the cursor there
 let MX = -1, MY = -1, HOVER_DECK = -1;
 let TRAIL = [], BUZZ = 1; // recent cursor samples [x, y, deck, ...] for the blur trail
 canvas.addEventListener('mousemove', e => {
@@ -830,7 +831,7 @@ canvas.addEventListener('mousemove', e => {
   MX = (e.clientX - rect.left) / cellW;
   MY = (e.clientY - rect.top) / cellH;
   canvas.style.cursor = (!INVERT && visibleCloudAt(Math.round(MX), Math.round(MY)) > 0.012)
-    ? 'crosshair' : 'default';
+    ? 'none' : 'default';
 });
 canvas.addEventListener('mouseleave', () => { MX = MY = -1; HOVER_DECK = -1; });
 
