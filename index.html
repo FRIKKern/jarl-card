@@ -40,6 +40,7 @@
     padding: 0 6vw;
     position: relative; /* so z-index wins — the full-screen canvas must not cover the card/button */
     z-index: 1;
+    pointer-events: none; /* clicks fall through to the sky (cloud-tap lightning); buttons re-enable */
   }
   .cardbox {
     display: flex;
@@ -385,27 +386,32 @@ function visibleCloudAt(col, row) {
   return v;
 }
 
-function spawnBolt(mega) {
+function spawnBolt(mega, at) {
   const cells = [];
   const forkChance = mega ? 0.24 : 0.07;
-  // strike from VISIBLE cloud, always: a column qualifies only if it has a
-  // cloud base that actually renders (zone feather applied, wisp tiers too
-  // faint to count) — then pick any qualifying column at random
-  const candidates = [];
-  for (let i = 0; i < 24; i++) {
-    const c = Math.floor(COLS * (0.08 + Math.random() * 0.84));
-    for (let rw = Math.floor(ROWS * 0.5); rw >= 0; rw--) {
-      if (visibleCloudAt(c, rw) > 0.07) { candidates.push(c, rw); break; }
-    }
-  }
   let col, startRow;
-  if (candidates.length) {
-    const k = 2 * Math.floor(Math.random() * (candidates.length / 2));
-    col = candidates[k];
-    startRow = Math.max(0, candidates[k + 1] - 2); // start inside the deck
-  } else { // genuinely bare sky: strike from the top of the frame
-    col = Math.floor(COLS * (0.2 + Math.random() * 0.6));
-    startRow = 0;
+  if (at) { // caller pinned the origin (e.g. a pressed cloud)
+    col = at.col;
+    startRow = at.row;
+  } else {
+    // strike from VISIBLE cloud, always: a column qualifies only if it has a
+    // cloud base that actually renders (zone feather applied, wisp tiers too
+    // faint to count) — then pick any qualifying column at random
+    const candidates = [];
+    for (let i = 0; i < 24; i++) {
+      const c = Math.floor(COLS * (0.08 + Math.random() * 0.84));
+      for (let rw = Math.floor(ROWS * 0.5); rw >= 0; rw--) {
+        if (visibleCloudAt(c, rw) > 0.07) { candidates.push(c, rw); break; }
+      }
+    }
+    if (candidates.length) {
+      const k = 2 * Math.floor(Math.random() * (candidates.length / 2));
+      col = candidates[k];
+      startRow = Math.max(0, candidates[k + 1] - 2); // start inside the deck
+    } else { // genuinely bare sky: strike from the top of the frame
+      col = Math.floor(COLS * (0.2 + Math.random() * 0.6));
+      startRow = 0;
+    }
   }
   const endRow = Math.floor(ROWS * ((mega ? 0.75 : 0.62) + Math.random() * (mega ? 0.23 : 0.34)));
   // text box in grid coords: bolts steer around it, never get clipped by it
@@ -678,6 +684,29 @@ function loop(now) {
 const strikeEl = document.getElementById('strike');
 strikeEl.addEventListener('click', () => { if (!INVERT) spawnBolt(true); });
 
+// press a cloud and it shoots lightning: verify there is VISIBLE cloud near
+// the tap, walk down that column to the cloud base, and strike from there.
+// Pressing bare sky does nothing — only clouds carry charge.
+canvas.addEventListener('click', e => {
+  if (INVERT) return;
+  const rect = canvas.getBoundingClientRect();
+  const col = Math.round((e.clientX - rect.left) / cellW);
+  const row = Math.round((e.clientY - rect.top) / cellH);
+  let bestCol = null, bestV = 0.03;
+  for (let dc = -5; dc <= 5; dc++) {
+    for (let dr = -3; dr <= 3; dr++) {
+      const v = visibleCloudAt(col + dc, row + dr);
+      if (v > bestV) { bestV = v; bestCol = col + dc; }
+    }
+  }
+  if (bestCol === null) return;
+  let base = row;
+  for (let rw = Math.floor(ROWS * 0.55); rw >= row; rw--) {
+    if (visibleCloudAt(bestCol, rw) > 0.035) { base = rw; break; }
+  }
+  spawnBolt(false, { col: bestCol, row: Math.max(0, base - 2) });
+});
+
 // typewriter: the role line slowly loses its composure, then repeats.
 // updateZone() after every character so the storm keeps dodging the text.
 const ROLES = [
@@ -729,6 +758,7 @@ function readTheme() {
   flashEl.style.background = INVERT ? '#0a0a0a' : '#ffffff';
   themeBtn.textContent = INVERT ? 'dark' : 'light'; // label = the mode you'd switch TO
   strikeEl.style.display = INVERT ? 'none' : '';     // no lightning → no button in light mode
+  canvas.style.cursor = INVERT ? 'default' : 'crosshair'; // dark mode: the sky is interactive
   if (INVERT) { bolts.length = 0; flashEl.style.opacity = 0; } // clear any in-flight storm
   rebuildPalette();
   drawFrame(t);
