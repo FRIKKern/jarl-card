@@ -552,18 +552,18 @@ function drawFrame(t) {
         else lum += 0.4 * glow * spread / (1 + 0.75 * Math.abs(dz));                        // 2. lit body
       }
     }
-    // hovered cloud: a TIGHT, potent electric spotlight — small and precise,
-    // buzzing (per-frame flicker), with a motion-blur trail that fades and
-    // widens slightly behind the cursor's path
+    // hovered cloud: a TINY, razor-sharp electric spotlight — near-full
+    // brightness inside a small disc, then a cliff (exp(-h⁴), not a soft
+    // Gaussian) — buzzing, with a short motion-blur trail behind the cursor
     for (let s = 0; s < TRAIL.length; s += 3) {
       if (TRAIL[s + 2] !== deck) continue;
       const k = s / 3;
-      const str = 0.34 * BUZZ * Math.pow(0.7, k);
-      if (str < 0.03) break;
-      const rr = 1 + 0.10 * k; // older samples spread: the blur
+      const str = 0.55 * BUZZ * Math.pow(0.66, k);
+      if (str < 0.04) break;
+      const rr = 1 + 0.12 * k; // older samples spread: the blur
       const dxh = (col - TRAIL[s]) / COLS, dyv = (row - TRAIL[s + 1]) / ROWS;
-      const hh = (dxh / (0.032 * rr)) ** 2 + (dyv / (0.042 * rr)) ** 2;
-      if (hh < 9) lum += str * Math.exp(-hh);
+      const hh = (dxh / (0.015 * rr)) ** 2 + (dyv / (0.020 * rr)) ** 2;
+      if (hh < 4) lum += str * Math.exp(-hh * hh);
     }
     if (lum > 0.035 || lum < -0.035) {
       const litLum = clamp(Math.round(CLOUD_LUM[base] + clamp(lum, -1, 1) * 165), 8, 205);
@@ -695,8 +695,8 @@ function drawFrame(t) {
     for (let s = 0; s < 3; s++) {
       ctx.fillStyle = g(120 + Math.floor(Math.random() * 135));
       ctx.fillText('·+*x'[Math.floor(Math.random() * 4)],
-        (MX + (Math.random() - 0.5) * 2.2) * cellW,
-        (MY + (Math.random() - 0.5) * 2.2) * cellH);
+        (MX + (Math.random() - 0.5) * 1.2) * cellW,
+        (MY + (Math.random() - 0.5) * 1.2) * cellH);
     }
     for (let s = 3; s < Math.min(TRAIL.length, 15); s += 3) {
       if (Math.random() < 0.5) continue;
@@ -741,7 +741,7 @@ function loop(now) {
   }
   // sample the cursor path for the electric trail (with a static-y jitter)
   if (!INVERT && MX >= 0) {
-    TRAIL.unshift(MX + (Math.random() - 0.5) * 0.7, MY + (Math.random() - 0.5) * 0.7, HOVER_DECK);
+    TRAIL.unshift(MX + (Math.random() - 0.5) * 0.35, MY + (Math.random() - 0.5) * 0.35, HOVER_DECK);
     if (TRAIL.length > 24) TRAIL.length = 24;
   } else if (TRAIL.length) TRAIL.length = 0;
   if (shake > 0) { // a jolt through the storm on strike
