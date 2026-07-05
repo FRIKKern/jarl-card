@@ -128,7 +128,7 @@
   <div class="cardbox">
     <div class="rule"></div>
     <h1>Frikk Jarl</h1>
-    <p class="role">Creative Developer<span class="cursor"></span></p>
+    <p class="role" aria-label="Creative Developer"><span id="rolewords" aria-hidden="true">Creative Developer</span><span class="cursor"></span></p>
     <button id="strike" type="button">create lightning</button>
   </div>
 </div>
@@ -677,6 +677,48 @@ function loop(now) {
 // the button: one mega-bolt per press, spam-friendly (dark mode only)
 const strikeEl = document.getElementById('strike');
 strikeEl.addEventListener('click', () => { if (!INVERT) spawnBolt(true); });
+
+// typewriter: the role line slowly loses its composure, then repeats.
+// updateZone() after every character so the storm keeps dodging the text.
+const ROLES = [
+  'Creative Developer',
+  'Crazy Artist',
+  'AI Workflow Specialist',
+  'Bad lover',
+  'Good friend',
+  'Loyal dog',
+  'Are you still reading?',
+  'Hello',
+  'Anyone there?',
+  'Hello darkness my old friend',
+  'HELLO???',
+];
+const roleEl = document.getElementById('rolewords');
+let roleI = 0, roleChars = ROLES[0].length, roleDel = false;
+function roleTick() {
+  const word = ROLES[roleI];
+  if (!roleDel) {
+    if (roleChars < word.length) {
+      roleEl.textContent = word.slice(0, ++roleChars);
+      updateZone();
+      setTimeout(roleTick, 45 + Math.random() * 75);          // human-ish typing
+    } else {
+      roleDel = true;
+      setTimeout(roleTick, 1400 + 50 * word.length);          // let it be read
+    }
+  } else {
+    if (roleChars > 0) {
+      roleEl.textContent = word.slice(0, --roleChars);
+      updateZone();
+      setTimeout(roleTick, 20 + Math.random() * 28);          // deleting is quicker
+    } else {
+      roleDel = false;
+      roleI = (roleI + 1) % ROLES.length;
+      setTimeout(roleTick, 420);                              // beat before the next thought
+    }
+  }
+}
+if (!still) setTimeout(roleTick, 2600); // reduced motion: stays "Creative Developer"
 
 // follow the viewer's theme: the in-page toggle and the artifact toggle both
 // stamp data-theme on <html>, and the OS preference drives the media query —
