@@ -89,6 +89,11 @@
     transition: color 0.15s, border-color 0.15s, background 0.15s;
   }
   #strike:hover { color: var(--bg); background: var(--ink); border-color: var(--ink); }
+  #ever {
+    margin: 0.55rem 0 0; font-size: 10px;
+    text-transform: uppercase; letter-spacing: 0.28em;
+    color: var(--dim); opacity: 0.8;
+  }
   #strike:focus-visible { outline: 1px solid var(--ink); outline-offset: 3px; }
   #strike:active { transform: translateY(1px); }
   #theme {
@@ -131,6 +136,7 @@
     <h1>Frikk Jarl</h1>
     <p class="role" aria-label="Creative Developer"><span id="rolewords" aria-hidden="true">Creative Developer</span><span class="cursor"></span></p>
     <button id="strike" type="button">create lightning</button>
+    <p id="ever" aria-live="off" hidden>⚡ <span id="evern">—</span> strikes ever</p>
   </div>
 </div>
 <button id="theme" type="button" aria-label="Toggle light or dark theme"></button>
@@ -177,11 +183,12 @@ const g = v => { v = tone(v); return `rgb(${v},${v},${v})`; };
 // lit clouds, sparks, cursor buzz) carry it — the storm itself stays B&W.
 // Saturation tapers at the extremes so white-hot stays near-white.
 const HUE = Math.floor(Math.random() * 360);
-const ac = (v, s = 75) => {
+const acH = (h, v, s = 75) => { // any hue — remote visitors' strikes render in THEIRS
   const tv = clamp(Math.round(tone(v)), 0, 255);
   const sat = Math.round(s * (1 - Math.abs(tv - 140) / 140 * 0.6));
-  return `hsl(${HUE} ${sat}% ${Math.round(tv / 255 * 100)}%)`;
+  return `hsl(${h} ${sat}% ${Math.round(tv / 255 * 100)}%)`;
 };
+const ac = (v, s = 75) => acH(HUE, v, s);
 const COLOR_LUM = Array.from({ length: N }, (_, i) => Math.round(lerp(0x1d, 0xf4, Math.pow(i / (N - 1), 0.9))));
 const DUST_LUM = 0x15;
 let COLORS = [], DUST = '';
@@ -412,7 +419,7 @@ function visibleCloudAt(col, row) {
 }
 
 const RECENT_COLS = []; // last few strike origins — new bolts steer AWAY from them
-function spawnBolt(mega, at) {
+function spawnBolt(mega, at, remoteHue) {
   const cells = [];
   const forkChance = mega ? 0.24 : 0.07;
   let col, startRow;
@@ -496,19 +503,23 @@ function spawnBolt(mega, at) {
     const D0 = cloudDecks(oc / COLS, or / ROWS, t);
     for (let i = D0.length - 1; i >= 0; i--) if (D0[i] > 0.012) { bdeck = i; break; }
   }
-  bolts.push({
+  const bolt = {
     deck: bdeck,
     cells, strokes, age: 0,
     life: strokes[strokes.length - 1] + (mega ? 13 : 9) + Math.floor(Math.random() * 5),
     endCol: col, endRow: row,
-    boost: mega ? 1.6 : 1,
+    boost: remoteHue != null ? 0.8 : mega ? 1.6 : 1, // remote strikes: slightly ghosted
     lx: cells.length ? cells[0] : col,
     ly: cells.length ? cells[1] : startRow,
     rscale: mega ? 1.8 : 1,
     mega: !!mega,
-    tinted: !!(mega || at), // YOUR strikes carry the accent; ambient stays white
-  });
-  shake = Math.max(shake, mega ? 9 : 5);
+    // hue: which color the channel discharges in. YOUR strikes = your accent,
+    // a remote visitor's strike = THEIR accent, ambient storm = white (null).
+    hue: remoteHue != null ? remoteHue : mega || at ? HUE : null,
+  };
+  bolts.push(bolt);
+  shake = Math.max(shake, mega ? 9 : remoteHue != null ? 3 : 5);
+  return bolt;
 }
 
 // sheet lightning: no channel — a broad flash inside the deck itself
@@ -557,7 +568,7 @@ function drawFrame(t) {
     if (bolt.age >= bolt.life) continue;
     bolt.bright = boltBright(bolt) * (0.92 + Math.random() * 0.08); // tiny jitter — "occasionally wrong"
     const glow = bolt.boost * bolt.bright;
-    if (glow > 0.05) lights.push(bolt.lx, bolt.ly, glow, bolt.rscale || 1, bolt.deck ?? VORTEX_Z, bolt.tinted ? 1 : 0);
+    if (glow > 0.05) lights.push(bolt.lx, bolt.ly, glow, bolt.rscale || 1, bolt.deck ?? VORTEX_Z, bolt.hue === HUE ? 1 : 0);
   }
   // hover: which cloud (occlusion-winning deck) is under the cursor right now?
   // That cloud gets a ~10% lift, and only a hovered cloud can be struck.
@@ -703,7 +714,7 @@ function drawFrame(t) {
   }
   // lightning on top: each return stroke re-flashes the channel, sky and clouds
   // together — the shared multi-stroke pulse
-  let flash = 0, flashT = false;
+  let flash = 0, flashT = null; // hue of the dominant bolt, null = white
   for (const bolt of bolts) {
     if (bolt.age >= bolt.life) continue;
     const br = bolt.bright; // computed in the lights pass above
@@ -733,17 +744,17 @@ function drawFrame(t) {
         if (veil < 0.1) continue; // buried inside dense foreground cloud
       } else { vSum++; vCnt++; }
       if (br > 0.3) { // dim halo widens the channel while a stroke is hot
-        ctx.fillStyle = bolt.tinted ? ac(Math.round(72 * veil), 55) : g(Math.round(72 * veil));
+        ctx.fillStyle = bolt.hue != null ? acH(bolt.hue, Math.round(72 * veil), 55) : g(Math.round(72 * veil));
         ctx.fillText(ch, (c - 1) * cellW, r * cellH);
         ctx.fillText(ch, (c + 1) * cellW, r * cellH);
         if (bolt.mega) { // the big one gets a second, fainter halo ring
-          ctx.fillStyle = bolt.tinted ? ac(Math.round(40 * veil), 55) : g(Math.round(40 * veil));
+          ctx.fillStyle = bolt.hue != null ? acH(bolt.hue, Math.round(40 * veil), 55) : g(Math.round(40 * veil));
           ctx.fillText(ch, (c - 2) * cellW, r * cellH);
           ctx.fillText(ch, (c + 2) * cellW, r * cellH);
         }
       }
       // core: white; your strikes get only a WHISPER of the accent
-      ctx.fillStyle = bolt.tinted ? ac(Math.round(vCore * veil), 22) : g(Math.round(vCore * veil));
+      ctx.fillStyle = bolt.hue != null ? acH(bolt.hue, Math.round(vCore * veil), 22) : g(Math.round(vCore * veil));
       ctx.fillText(ch, c * cellW, r * cellH);
       if (bolt.mega && br > 0.4) // mega: double-width white core
         ctx.fillText(ch, c * cellW + cellW * 0.55, r * cellH);
@@ -752,9 +763,9 @@ function drawFrame(t) {
     // the bolt: mostly-buried channel → dimmer overlay flash (never fully dark)
     const cover = vCnt ? vSum / vCnt : 1;
     const fc = Math.min(1.5, bolt.boost * br) * (0.4 + 0.6 * cover);
-    if (fc > flash) { flash = fc; flashT = !!bolt.tinted; } // the dominant bolt sets the flash's color
+    if (fc > flash) { flash = fc; flashT = bolt.hue; } // the dominant bolt's hue colors the flash (null = white)
     if (bolt.age < 6 && bolt.cells.length) { // sparks kicked up at the strike point
-      ctx.fillStyle = bolt.tinted ? ac(230, 45) : g(230);
+      ctx.fillStyle = bolt.hue != null ? acH(bolt.hue, 230, 45) : g(230);
       for (let s = 0; s < 5; s++) {
         const sc = bolt.endCol + Math.round((Math.random() - 0.5) * 7);
         const sr = bolt.endRow - Math.floor(Math.random() * 3);
@@ -780,7 +791,7 @@ function drawFrame(t) {
     }
   }
   if (flash > 0.02) // ambient flash: white. Your strike's flash: a pale wash of your accent
-    flashEl.style.background = INVERT ? '#0a0a0a' : flashT ? `hsl(${HUE} 55% 88%)` : '#ffffff';
+    flashEl.style.background = INVERT ? '#0a0a0a' : flashT != null ? `hsl(${flashT} 55% 88%)` : '#ffffff';
   flashEl.style.opacity = flash > 0.02 ? ((INVERT ? 0.16 : 0.22) * flash).toFixed(3) : 0;
 }
 
@@ -835,7 +846,11 @@ function loop(now) {
 
 // the button: one mega-bolt per press, spam-friendly (dark mode only)
 const strikeEl = document.getElementById('strike');
-strikeEl.addEventListener('click', () => { if (!INVERT) spawnBolt(true); });
+strikeEl.addEventListener('click', () => {
+  if (INVERT) return;
+  const b = spawnBolt(true);
+  if (b) reportStrike(b.lx / COLS, b.ly / ROWS, true);
+});
 
 // lightning REQUIRES a hovered cloud: a strike only fires from a point with
 // visible cloud under it — the hover highlight shows which cloud is armed
@@ -846,6 +861,7 @@ canvas.addEventListener('click', e => {
   const row = Math.max(0, Math.round((e.clientY - rect.top) / cellH));
   if (visibleCloudAt(col, row) <= 0.012) return; // bare sky: nothing to discharge
   spawnBolt(false, { col, row: Math.max(0, row - 1) });
+  reportStrike(col / COLS, row / ROWS, false);
 });
 
 // cursor tracking for the hover highlight; over an armed cloud the OS cursor
@@ -924,6 +940,7 @@ function readTheme() {
   nameEl.style.textShadow = INVERT ? 'none' : `0 0 24px hsl(${HUE} 70% 60% / 0.24)`;
   themeBtn.textContent = INVERT ? 'dark' : 'light'; // label = the mode you'd switch TO
   strikeEl.style.display = INVERT ? 'none' : '';     // no lightning → no button in light mode
+  everEl.hidden = INVERT || !EVER_SEEN;              // counter rides with the storm
   canvas.style.cursor = 'default'; // crosshair appears only over an armed (hovered) cloud
   if (INVERT) { bolts.length = 0; flashEl.style.opacity = 0; } // clear any in-flight storm
   rebuildPalette();
@@ -938,6 +955,70 @@ try { const saved = localStorage.getItem('fj-theme'); if (saved) document.docume
 new MutationObserver(readTheme).observe(document.documentElement,
   { attributes: true, attributeFilter: ['data-theme', 'style', 'class'] });
 matchMedia('(prefers-color-scheme: light)').addEventListener('change', readTheme);
+
+// ---------- shared storm (Barkpark pulse channel) ----------
+// Every visitor's strikes flow through one Barkpark 'pulse' channel: yours are
+// POSTed (fire-and-forget), everyone's stream back on a slow poll and render
+// in THEIR accent hue, and the counter is the number of strikes EVER, by
+// anyone. If Barkpark is unreachable the storm is simply local — silence,
+// backoff, zero console noise.
+const PULSE = 'https://guerrilla.barkpark.cloud/v1/plugins/pulse/jarl-card';
+const everEl = document.getElementById('ever');
+const evernEl = document.getElementById('evern');
+const MINE = new Set(); // event ids we posted — never re-render our own
+let CURSOR = 0, POLL_MS = 3000, EVER_SEEN = false, FIRST_POLL = true;
+
+function setEver(total) {
+  if (typeof total !== 'number') return;
+  EVER_SEEN = true;
+  evernEl.textContent = total.toLocaleString('en-US');
+  everEl.hidden = INVERT;
+}
+
+function reportStrike(x, y, mega) {
+  if (typeof fetch !== 'function') return;
+  try {
+    fetch(PULSE + '/events', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ hue: HUE, x: clamp(x, 0, 1), y: clamp(y, 0, 1), mega: !!mega }),
+    }).then(r => (r.ok ? r.json() : null)).then(d => {
+      if (d && d.ok) { MINE.add(d.id); setEver(d.total); }
+    }).catch(() => {});
+  } catch (e) { /* storm stays local */ }
+}
+
+function pollStorm() {
+  if (typeof fetch !== 'function') return;
+  if (INVERT || document.hidden) { setTimeout(pollStorm, 4000); return; } // idle: paper mode / hidden tab
+  fetch(PULSE + '/recent?since=' + CURSOR)
+    .then(r => (r.ok ? r.json() : Promise.reject(0)))
+    .then(d => {
+      POLL_MS = 3000; // healthy again
+      const first = FIRST_POLL; FIRST_POLL = false;
+      CURSOR = d.next ?? CURSOR;
+      setEver(d.total);
+      if (!first && Array.isArray(d.events)) {
+        d.events
+          .filter(e => !MINE.has(e.id) && e.payload)
+          .slice(0, 4) // a burst of visitors never becomes a strobe
+          .forEach((e, i) => setTimeout(() => {
+            if (INVERT || bolts.length > 7) return;
+            const P = e.payload;
+            spawnBolt(!!P.mega, {
+              col: clamp(Math.round(P.x * COLS), 1, COLS - 2),
+              row: clamp(Math.round(P.y * ROWS), 0, ROWS - 2),
+            }, clamp(Math.round(P.hue ?? 0), 0, 359));
+          }, i * 650)); // spread them out — distinct events, not one blast
+      }
+      setTimeout(pollStorm, POLL_MS);
+    })
+    .catch(() => {
+      POLL_MS = Math.min(60000, POLL_MS * 2); // quiet exponential backoff
+      setTimeout(pollStorm, POLL_MS);
+    });
+}
+try { pollStorm(); } catch (e) { /* storm stays local */ }
 
 resize();
 updateZone();
