@@ -960,11 +960,6 @@ function readTheme() {
          : v  ? v === '0'
          : matchMedia('(prefers-color-scheme: light)').matches;
   flashEl.style.background = INVERT ? '#0a0a0a' : '#ffffff';
-  // "me": the name lights up in the visit's accent — a quiet glow in the dark
-  // theme, deep ink-of-that-hue on paper. Understated, not hefty.
-  const nameEl = document.querySelector('.card h1');
-  nameEl.style.color = INVERT ? `hsl(${HUE} 45% 33%)` : `hsl(${HUE} 48% 64%)`;
-  nameEl.style.textShadow = INVERT ? 'none' : `0 0 24px hsl(${HUE} 70% 60% / 0.24)`;
   themeBtn.textContent = INVERT ? 'dark' : 'light'; // label = the mode you'd switch TO
   strikeEl.style.display = INVERT ? 'none' : '';     // no lightning → no button in light mode
   everEl.hidden = INVERT || !EVER_SEEN;              // counter rides with the storm
