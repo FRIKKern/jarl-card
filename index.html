@@ -222,7 +222,7 @@ const DK = Array.from({ length: NDECKS }, (_, i) => {
           11 + i * 41, cov, 0.03, lerp(0.32, 0.16, u), lerp(0.95, 1.20, u)];
 });
 // per-deck glyphs (wisp→dense) and luminances, derived from depth
-const TIER_F = [0.48, 0.65, 0.82, 1];
+const TIER_F = [0.38, 0.60, 0.80, 1]; // wider spread: deeper shadows, brighter crests
 const CLOUD_CH = [], CLOUD_LUM = [];
 for (let i = 0; i < NDECKS; i++) {
   const u = i / (NDECKS - 1);
@@ -233,14 +233,17 @@ for (let i = 0; i < NDECKS; i++) {
   const uf = i >= FRONT_START ? (i - FRONT_START) / (NDECKS - 1 - FRONT_START) : 0;
   let dense = i >= FRONT_START
     // small front wisps sit QUIET (dim); only the big nearest decks run bright
-    ? Math.round(uf > 0.75 ? lerp(118, 132, (uf - 0.75) / 0.25) : lerp(88, 98, uf / 0.75))
-    : Math.round(lerp(29, 100, Math.pow(i / (FRONT_START - 1), 1.15)));
+    ? Math.round(uf > 0.75 ? lerp(116, 140, (uf - 0.75) / 0.25) : lerp(84, 100, uf / 0.75))
+    : Math.round(lerp(22, 112, Math.pow(i / (FRONT_START - 1), 1.15)));
+  // darker and lighter SKIES: each deck rolls its own tone — some decks run
+  // deep and brooding, some pale — widening the sky's contrast range
+  dense = Math.round(dense * (0.72 + 0.56 * hash(i * 3 + 1, 977)));
   // the vortex's own glow: decks whose z sits near the vortex plane run a bit
   // lighter, fading with z-distance on BOTH sides — the funnel lights its sky
   dense += Math.round(34 * Math.exp(-(((i - (FRONT_START - 0.5)) * 8 / NDECKS) ** 2) / 1.6));
   for (let k = 0; k < 4; k++) {
     CLOUD_CH.push(chars[k]);
-    CLOUD_LUM.push(Math.max(10, Math.round(dense * TIER_F[k])));
+    CLOUD_LUM.push(Math.max(6, Math.round(dense * TIER_F[k])));
   }
 }
 const CBASE = NDECKS * 4;     // lit buckets start after all base tiers
@@ -251,8 +254,8 @@ let CLOUD_C = []; // themed cloud colors, rebuilt on theme change
 // lit-cloud ramp: a strike brightens each cloud FROM ITS OWN base shade into
 // this fine ramp, so depth/density differences survive being lit — a dense
 // cloud lit stays brighter than a wisp lit at the same distance.
-const LITN = 16; // spans silhouette-dark (cloaked, backlit) up to white-hot
-const LIT_LUM = Array.from({ length: LITN }, (_, k) => Math.round(lerp(8, 205, k / (LITN - 1))));
+const LITN = 24; // finer + wider: near-black silhouette up to white-hot
+const LIT_LUM = Array.from({ length: LITN }, (_, k) => Math.round(lerp(4, 230, k / (LITN - 1))));
 const LIT_CH = Array.from({ length: LITN }, (_, k) => RAMP[clamp(Math.round(lerp(4, 18, k / (LITN - 1))), 1, N - 1)]);
 let LIT_C = [], LIT_CA = []; // white ramp (ambient strikes) + accent ramp (YOUR strikes/buzz)
 
@@ -640,8 +643,17 @@ function drawFrame(t) {
       if (hh < 4) { const add = str * Math.exp(-hh * hh); lum += add; pos += add; posT += add; } // buzz = your color
     }
     if (lum > 0.035 || lum < -0.035) {
-      const litLum = clamp(Math.round(CLOUD_LUM[base] + clamp(lum, -1, 1) * 165), 8, 205);
-      const lv = clamp(Math.round((litLum - 8) / (205 - 8) * (LITN - 1)), 0, LITN - 1);
+      const bn = CLOUD_LUM[base];
+      // absorption: darker skies EAT light (respond less), lighter skies catch
+      // more — the same flash reads differently across the sky's tones
+      const resp = Math.min(1.35, 0.45 + 0.95 * (bn / 140));
+      let lift = clamp(lum, -1, 1) * 165 * resp;
+      // ...but the light's COLOR always pushes a bit through a dark cloud —
+      // unless it is near max black, or the light barely reaches this cell
+      const minPush = clamp(lum, 0, 1) * 60;
+      if (lum > 0 && bn > 14 && lift < minPush) lift = minPush;
+      const litLum = clamp(Math.round(bn + lift), 4, 230);
+      const lv = clamp(Math.round((litLum - 4) / (230 - 4) * (LITN - 1)), 0, LITN - 1);
       // accent only where YOUR light dominates; ambient strikes stay white
       clouds[CBASE + (posT * 2 > pos ? LITN + lv : lv)].push(col, row);
     } else {
