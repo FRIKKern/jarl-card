@@ -1,0 +1,713 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="Frikk Jarl — Creative Developer">
+<meta name="color-scheme" content="dark light">
+<title>Frikk Jarl — Creative Developer</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  :root {
+    /* dark is the default — the storm was designed on black. --is-dark flips
+       the JS palette (light glyphs on black ⇄ dark ink on paper). */
+    --bg: #050505;
+    --ink: #f2f2f2;
+    --dim: #8a8a8a;
+    --rule: #2a2a2a;
+    --is-dark: 1;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: light) {
+    :root { --bg: #f3f2ef; --ink: #141414; --dim: #5c5c5c; --rule: #d3d1cb; --is-dark: 0; }
+  }
+  :root[data-theme="dark"]  { --bg: #050505; --ink: #f2f2f2; --dim: #8a8a8a; --rule: #2a2a2a; --is-dark: 1; }
+  :root[data-theme="light"] { --bg: #f3f2ef; --ink: #141414; --dim: #5c5c5c; --rule: #d3d1cb; --is-dark: 0; }
+  html, body { height: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--mono);
+    display: flex;
+    overflow: hidden;
+  }
+  .card {
+    flex: 0 0 40%;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    padding: 0 6vw;
+    position: relative; /* so z-index wins — the full-screen canvas must not cover the card/button */
+    z-index: 1;
+  }
+  .cardbox {
+    display: flex;
+    flex-direction: column;
+    gap: 0.85rem;
+    width: max-content;
+    max-width: 100%;
+  }
+  .card .rule { width: 40px; height: 1px; background: var(--rule); }
+  h1 {
+    font-size: clamp(1.9rem, 3.4vw, 3.2rem);
+    font-weight: 500;
+    letter-spacing: 0.01em;
+    text-wrap: balance;
+    line-height: 1.0;
+  }
+  .role {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.35em;
+    color: var(--dim);
+  }
+  .role .cursor {
+    display: inline-block;
+    width: 0.55em; height: 1em;
+    margin-left: 0.45em;
+    vertical-align: text-bottom;
+    background: var(--dim);
+    animation: blink 1.1s steps(1) infinite;
+  }
+  @keyframes blink { 50% { opacity: 0; } }
+  @media (prefers-reduced-motion: reduce) { .role .cursor { animation: none; } }
+  #strike {
+    align-self: flex-start;
+    margin-top: 0.9rem;
+    font: inherit;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.3em;
+    color: var(--dim);
+    background: none;
+    border: 1px solid var(--rule);
+    padding: 0.9em 1.3em 0.9em 1.6em;
+    cursor: pointer;
+    pointer-events: auto;
+    transition: color 0.15s, border-color 0.15s, background 0.15s;
+  }
+  #strike:hover { color: var(--bg); background: var(--ink); border-color: var(--ink); }
+  #strike:focus-visible { outline: 1px solid var(--ink); outline-offset: 3px; }
+  #strike:active { transform: translateY(1px); }
+  #theme {
+    position: fixed;
+    top: calc(env(safe-area-inset-top, 0px) + 1.1rem);
+    right: 1.3rem;
+    z-index: 3;
+    font: inherit; font-size: 10px;
+    text-transform: uppercase; letter-spacing: 0.28em;
+    color: var(--dim); background: none; border: none;
+    padding: 0.5em; cursor: pointer; opacity: 0.7;
+    transition: opacity 0.15s, color 0.15s;
+  }
+  #theme::before { content: "◐ "; }
+  #theme:hover { opacity: 1; color: var(--ink); }
+  #theme:focus-visible { outline: 1px solid var(--ink); outline-offset: 3px; }
+  .stage { position: fixed; inset: 0; }
+  canvas { position: absolute; inset: 0; }
+  #flash { position: fixed; inset: 0; background: #fff; opacity: 0; pointer-events: none; }
+  /* Phones, portrait: the funnel bends around the name */
+  @media (max-width: 760px) and (orientation: portrait) {
+    .card {
+      position: fixed; inset: 0; flex: none;
+      padding: 0 8vw;
+      pointer-events: none;
+    }
+    .cardbox { gap: 0.7rem; }
+  }
+  /* Phones, landscape: keep the split but tighten the card padding */
+  @media (max-height: 500px) {
+    .card { padding: 0 5vw; flex-basis: 44%; }
+  }
+</style>
+</head>
+<body>
+
+<div class="card">
+  <div class="cardbox">
+    <div class="rule"></div>
+    <h1>Frikk Jarl</h1>
+    <p class="role">Creative Developer<span class="cursor"></span></p>
+    <button id="strike" type="button">create lightning</button>
+  </div>
+</div>
+<button id="theme" type="button" aria-label="Toggle light or dark theme"></button>
+<div class="stage"><canvas id="c" aria-hidden="true"></canvas></div>
+<div id="flash" aria-hidden="true"></div>
+
+<script>
+'use strict';
+// ---------- value noise + fbm ----------
+function hash(ix, iy) {
+  let h = (ix * 374761393 + iy * 668265263) | 0;
+  h = Math.imul(h ^ (h >>> 13), 1274126177);
+  return ((h ^ (h >>> 16)) >>> 0) / 4294967295;
+}
+function smooth(a, b, u) { return a + (b - a) * u * u * (3 - 2 * u); }
+function noise(x, y) {
+  const ix = Math.floor(x), iy = Math.floor(y), fx = x - ix, fy = y - iy;
+  return smooth(
+    smooth(hash(ix, iy),     hash(ix + 1, iy),     fx),
+    smooth(hash(ix, iy + 1), hash(ix + 1, iy + 1), fx),
+    fy
+  );
+}
+function fbm(x, y) {
+  return (noise(x, y) * 0.5 + noise(x * 2.03, y * 2.03) * 0.25 +
+          noise(x * 4.01, y * 4.01) * 0.125 + noise(x * 8.05, y * 8.05) * 0.0625) / 0.9375;
+}
+const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
+const TAU = Math.PI * 2;
+const sstep = (e0, e1, v) => { const u = clamp((v - e0) / (e1 - e0), 0, 1); return u * u * (3 - 2 * u); };
+const lerp = (a, b, u) => a + (b - a) * u;
+
+// ---------- monochrome glyph ramp ----------
+const RAMP = ' (tjxucXUCQOmqdkao&%$';
+const N = RAMP.length;
+// luminances are authored for DARK mode (light glyphs on black); light mode
+// flips luminance to dark ink on paper via tone(). One source, two themes.
+let INVERT = false;
+// dark mode: luminance as authored. light mode: flip to ink-on-paper (clouds
+// are dropped entirely in light mode, so this only tones the vortex/lightning).
+const tone = v => INVERT ? 255 - v : v;
+const g = v => { v = tone(v); return `rgb(${v},${v},${v})`; };
+const COLOR_LUM = Array.from({ length: N }, (_, i) => Math.round(lerp(0x1d, 0xf4, Math.pow(i / (N - 1), 0.9))));
+const DUST_LUM = 0x15;
+let COLORS = [], DUST = '';
+// cloud banks, two parallax decks: a slow far layer and a faster, slightly
+// brighter near layer gliding across it — glyphs from the ramp's wispy low end
+// six parallax decks, far→near: bigger shapes, faster drift, brighter tone,
+// shallower reach the closer they get. Decks 4-5 fly IN FRONT of the vortex.
+// Each deck: [xScale, xSpeed, yScale, ySpeed, seed, threshold, reach0, reach1]
+// Each deck: [xScale, xSpeed, yScale, ySpeed, seed, threshold, reach0, reach1, lightGain]
+// lightGain = how strongly the vortex's light lifts this deck (near decks catch
+// far more of it — light falls off with parallax distance).
+// The two nearest decks (6-7) fly IN FRONT of the vortex and carry raised
+// thresholds, so they appear ~60% less: rare fast sweeps, not constant cover.
+const DK = [
+  [6.0, 0.022, 7.0, -0.008,  10, 0.44, 0.10, 0.62, 0.25],
+  [5.2, 0.030, 6.5, -0.010,  20, 0.45, 0.09, 0.60, 0.35],
+  [4.2, 0.050, 6.0, -0.015,  40, 0.47, 0.07, 0.56, 0.45],
+  [3.0, 0.175, 5.0,  0.030,  80, 0.50, 0.05, 0.47, 0.60],
+  [1.9, 0.450, 3.6,  0.050, 160, 0.56, 0.04, 0.38, 0.75],
+  [1.6, 0.700, 3.0,  0.060, 240, 0.62, 0.03, 0.30, 0.90],
+  [1.3, 0.900, 2.7,  0.070, 280, 0.66, 0.02, 0.26, 1.00],
+  [1.1, 1.200, 2.4,  0.090, 320, 0.70, 0.02, 0.21, 1.10],
+];
+// glyph ramp per deck (wisp→dense), then 3 lightning-lit tiers at index 32
+const CLOUD_CH = [
+  '(', '(', 't', 'x',   '(', '(', 't', 'x',   '(', '(', 't', 'x',
+  '(', 't', 'x', 'u',   't', 'x', 'u', 'c',   't', 'x', 'u', 'c',
+  'x', 'u', 'c', 'o',   'x', 'u', 'c', 'o',
+  'x', 'u', 'c',
+];
+const CLOUD_CO = [
+  '#0e0e0e', '#131313', '#181818', '#1d1d1d',
+  '#101010', '#161616', '#1c1c1c', '#222222',
+  '#141414', '#1c1c1c', '#252525', '#2e2e2e',
+  '#1c1c1c', '#272727', '#333333', '#404040',
+  '#262626', '#363636', '#464646', '#565656',
+  '#2e2e2e', '#404040', '#525252', '#646464',
+  '#363636', '#4a4a4a', '#5e5e5e', '#727272',
+  '#3e3e3e', '#545454', '#6a6a6a', '#808080',
+  '#464646', '#6e6e6e', '#8f8f8f',
+];
+const CLOUD_LUM = CLOUD_CO.map(h => parseInt(h.slice(1, 3), 16));
+let CLOUD_C = []; // themed cloud colors, rebuilt on theme change
+
+// lit-cloud ramp: a strike brightens each cloud FROM ITS OWN base shade into
+// this fine ramp, so depth/density differences survive being lit — a dense
+// cloud lit stays brighter than a wisp lit at the same distance.
+const LITN = 14;
+const LIT_LUM = Array.from({ length: LITN }, (_, k) => Math.round(lerp(34, 205, k / (LITN - 1))));
+const LIT_CH = Array.from({ length: LITN }, (_, k) => RAMP[clamp(Math.round(lerp(4, 18, k / (LITN - 1))), 1, N - 1)]);
+let LIT_C = [];
+
+// rebuild every canvas color for the current theme (dark = as authored,
+// light = luminance-flipped to ink-on-paper)
+function rebuildPalette() {
+  COLORS = COLOR_LUM.map(g);
+  CLOUD_C = CLOUD_LUM.map(g);
+  LIT_C = LIT_LUM.map(g);
+  DUST = g(DUST_LUM);
+}
+
+// one shared cloud field — the renderer and the bolt spawner must agree on
+// where cloud exists. Returns via scratch to avoid per-cell allocation.
+// deck speed = parallax base (how close to the VIEWER) × storm boost (how
+// close in z-depth to the VORTEX's own plane, which sits between decks 5 and
+// 6). Adjacent decks ride the rotation hardest; the boost tapers with
+// z-distance in both directions. Constant per deck — uniform drift, no shear.
+const VORTEX_Z = 5.5;
+const DECK_SPEED = DK.map((p, i) => 1 + 0.8 / (1 + Math.abs(i - VORTEX_Z)));
+
+const DECKS = new Array(DK.length).fill(0);
+function cloudDecks(colN, rowN, tt) {
+  for (let i = 0; i < DK.length; i++) {
+    const p = DK[i];
+    if (rowN >= p[7]) { DECKS[i] = 0; continue; }
+    const s = DECK_SPEED[i];
+    DECKS[i] = (fbm(colN * p[0] + tt * p[1] * s, rowN * p[2] + tt * p[3] * s + p[4]) - p[5]) *
+               (1 - sstep(p[6], p[7], rowN));
+  }
+  return DECKS;
+}
+
+// ---------- canvas / grid ----------
+const canvas = document.getElementById('c');
+const stage = canvas.parentElement;
+const ctx = canvas.getContext('2d');
+let COLS, ROWS, cellW, cellH;
+let AXIS0 = 0.68; // funnel spine: right of the card on desktop, centered on phones
+
+// ---------- dodge zone: the funnel bends around the rendered name ----------
+const overlayMQ = matchMedia('(max-width: 760px) and (orientation: portrait)');
+let ZONE = null; // {x0,x1,y0,y1} in funnel coords, or null when panels are separate
+
+function updateZone() {
+  const s = stage.getBoundingClientRect();
+  const r = document.querySelector('.cardbox').getBoundingClientRect();
+  ZONE = {
+    x0: (r.left - s.left) / s.width,
+    x1: (r.right - s.left) / s.width,
+    y0: ((r.top - s.top) / cellH) / (ROWS - 1),
+    y1: ((r.bottom - s.top) / cellH) / (ROWS - 1),
+  };
+}
+
+function resize() {
+  const w = stage.clientWidth, h = stage.clientHeight;
+  AXIS0 = overlayMQ.matches ? 0.5 : 0.68;
+  cellH = Math.max(10, Math.floor(h / 64));
+  cellW = Math.round(cellH * 0.62);
+  COLS = Math.ceil(w / cellW);
+  ROWS = Math.ceil(h / cellH);
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = w * dpr;
+  canvas.height = h * dpr;
+  canvas.style.width = w + 'px';
+  canvas.style.height = h + 'px';
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.font = cellH + 'px ' + getComputedStyle(document.body).fontFamily;
+  ctx.textBaseline = 'top';
+}
+window.addEventListener('resize', () => { resize(); updateZone(); drawFrame(t); });
+
+// ---------- the tornado: one density function ----------
+function density(x, y, t) {
+  const sway = (fbm(y * 2.6 + 3.7, t * 0.26) - 0.5) * (0.14 + 0.32 * y);
+  let axis = AXIS0 + sway;
+  const breathe = 0.9 + 0.25 * (fbm(y * 1.4, t * 0.18 + 9.1) - 0.5);
+  let r = (0.035 + 0.30 * Math.pow(1 - y, 1.6)) * breathe;
+  if (ZONE) {
+    // vertical influence of the text band, feathered above and below
+    const g = sstep(ZONE.y0 - 0.16, ZONE.y0 + 0.02, y) * (1 - sstep(ZONE.y1 - 0.02, ZONE.y1 + 0.16, y));
+    if (g > 0) {
+      r *= 1 - 0.30 * g;                              // squeeze past the name
+      const clear = ZONE.x1 + r + 0.05;               // spine target that clears the text
+      axis = lerp(axis, Math.max(axis, clear), g);    // S-bend around it
+    }
+  }
+  const dx = (x - axis) / r;
+  if (dx < -1.35 || dx > 1.35) return 0;
+  const body = Math.pow(sstep(1.3, 0.15, Math.abs(dx)), 0.8);
+  const tex = fbm(dx * 1.7 + t * 1.15 + y * 1.1, y * 6.5 - t * 1.7);
+  let d = body * (0.30 + 1.05 * tex);
+  d *= 0.86 + 0.28 * SKY_CHARGE; // the funnel breathes with the storm charge — felt, not seen
+  if (ZONE && d > 0) {
+    // hard feathered exclusion: no glyph ever sits on the type
+    const mx = sstep(ZONE.x0 - 0.06, ZONE.x0 - 0.015, x) * (1 - sstep(ZONE.x1 + 0.015, ZONE.x1 + 0.06, x));
+    const my = sstep(ZONE.y0 - 0.05, ZONE.y0 - 0.012, y) * (1 - sstep(ZONE.y1 + 0.012, ZONE.y1 + 0.05, y));
+    d *= 1 - mx * my;
+  }
+  return d;
+}
+
+// ---------- lightning ----------
+const bolts = []; // {cells: [col,row,ch, ...], age, life, restrikes, endCol, endRow}
+// 1/f-flavored storm clock: three non-harmonic slow waves + drifting noise.
+// Surges and lulls you can half-feel coming, but the pattern never repeats —
+// the "predictions mostly right, occasionally wrong" band that reads as
+// natural instead of metronomic or random.
+function stormIntensity(tt) {
+  const w = 0.5
+    + 0.24 * Math.sin(TAU * tt / 31)
+    + 0.18 * Math.sin(TAU * tt / 50 + 1.7)
+    + 0.14 * Math.sin(TAU * tt / 81 + 4.1)
+    + 0.35 * (fbm(tt * 0.023, 5.5) - 0.5);
+  return clamp(w, 0.04, 1);
+}
+let excite = 0;       // Hawkes-style self-excitation: strikes beget strikes
+let refractory = 20;  // brief quiet after each strike (and at page load)
+let SKY_CHARGE = 0.5; // storm charge the clouds/vortex breathe with (leads strikes)
+let shake = 0;
+const flashEl = document.getElementById('flash');
+const SPARKS = '*+x·';
+
+// real flashes fire several return strokes ~35-50ms apart — the naked-eye
+// flicker. Schedule irregular re-illuminations; the channel, the sky flash and
+// the cloud glow all pulse together on each one (that shared pulse is the
+// satisfying part — one event, felt in three places at once).
+function makeStrokes(maxExtra, multiChance) {
+  const strokes = [0];
+  let a = 0;
+  const n = Math.random() < multiChance ? 1 + Math.floor(Math.random() * maxExtra) : 0;
+  for (let s = 0; s < n; s++) { a += 2 + Math.floor(Math.random() * 4); strokes.push(a); }
+  return strokes;
+}
+function boltBright(bolt) {
+  let b = 0.16 * (1 - bolt.age / bolt.life); // persistent hot-channel afterglow
+  for (let s = 0; s < bolt.strokes.length; s++) {
+    const d = bolt.age - bolt.strokes[s];
+    const amp = s === 0 ? 1 : Math.max(0.3, 0.62 - 0.16 * s); // re-strikes are dim ghosts, not equal flashes
+    b = Math.max(b, amp * (d >= 0 ? Math.exp(-d * 0.5) : Math.exp(d * 1.3)));
+  }
+  return b;
+}
+
+function inZone(x, y, pad) {
+  return ZONE && x > ZONE.x0 - pad && x < ZONE.x1 + pad && y > ZONE.y0 - pad && y < ZONE.y1 + pad;
+}
+
+// cloud strength AS RENDERED at a cell — the raw field minus the text-zone
+// feather, so the bolt spawner never anchors to cloud the viewer can't see
+function visibleCloudAt(col, row) {
+  const xN = col / COLS, yF = row / (ROWS - 1);
+  const D = cloudDecks(xN, row / ROWS, t);
+  let v = 0;
+  for (let i = 0; i < D.length; i++) if (D[i] > v) v = D[i];
+  if (v > 0 && ZONE) {
+    const mx = sstep(ZONE.x0 - 0.09, ZONE.x0 - 0.01, xN) * (1 - sstep(ZONE.x1 + 0.01, ZONE.x1 + 0.09, xN));
+    const my = sstep(ZONE.y0 - 0.08, ZONE.y0 - 0.01, yF) * (1 - sstep(ZONE.y1 + 0.01, ZONE.y1 + 0.08, yF));
+    v *= 1 - mx * my;
+  }
+  return v;
+}
+
+function spawnBolt(mega) {
+  const cells = [];
+  const forkChance = mega ? 0.24 : 0.07;
+  // strike from VISIBLE cloud, always: a column qualifies only if it has a
+  // cloud base that actually renders (zone feather applied, wisp tiers too
+  // faint to count) — then pick any qualifying column at random
+  const candidates = [];
+  for (let i = 0; i < 24; i++) {
+    const c = Math.floor(COLS * (0.08 + Math.random() * 0.84));
+    for (let rw = Math.floor(ROWS * 0.5); rw >= 0; rw--) {
+      if (visibleCloudAt(c, rw) > 0.07) { candidates.push(c, rw); break; }
+    }
+  }
+  let col, startRow;
+  if (candidates.length) {
+    const k = 2 * Math.floor(Math.random() * (candidates.length / 2));
+    col = candidates[k];
+    startRow = Math.max(0, candidates[k + 1] - 2); // start inside the deck
+  } else { // genuinely bare sky: strike from the top of the frame
+    col = Math.floor(COLS * (0.2 + Math.random() * 0.6));
+    startRow = 0;
+  }
+  const endRow = Math.floor(ROWS * ((mega ? 0.75 : 0.62) + Math.random() * (mega ? 0.23 : 0.34)));
+  // text box in grid coords: bolts steer around it, never get clipped by it
+  const z = ZONE ? {
+    x0: (ZONE.x0 - 0.03) * COLS, x1: (ZONE.x1 + 0.03) * COLS,
+    y0: ZONE.y0 * (ROWS - 1),    y1: ZONE.y1 * (ROWS - 1) + 2,
+  } : null;
+  let row = startRow;
+  for (; row < endRow; row++) {
+    const turn = Math.random();
+    let drift = turn < 0.28 ? -1 : turn < 0.56 ? 1 : 0;
+    if (Math.random() < 0.10) drift *= 2; // hard jag
+    if (mega && Math.random() < 0.28) drift *= 2; // mega wanders wider across the sky
+    if (z && row >= z.y0 - 5 && row <= z.y1) {
+      const nx = col + drift;
+      if (nx >= z.x0 && nx <= z.x1) drift = (col - z.x0 < z.x1 - col) ? -2 : 2; // veer around the name
+    }
+    col += drift;
+    if (col < 1 || col > COLS - 2) break;
+    cells.push(col, row, drift === 0 ? '|' : drift > 0 ? '\\' : '/');
+    if (Math.random() < forkChance && row > 3) { // fork
+      let bcol = col;
+      const bdir = Math.random() < 0.5 ? -1 : 1;
+      const blen = (mega ? 4 : 2) + Math.floor(Math.random() * (mega ? 9 : 5));
+      for (let i = 1; i <= blen; i++) {
+        bcol += bdir;
+        if (mega && Math.random() < 0.35) bcol += bdir; // extra horizontal reach on the big one
+        if (bcol < 1 || bcol > COLS - 2) break;
+        if (z && row + i >= z.y0 && row + i <= z.y1 && bcol >= z.x0 && bcol <= z.x1) break;
+        cells.push(bcol, row + i, bdir > 0 ? '\\' : '/');
+      }
+    }
+  }
+  // one bold strike, occasionally a single dim re-flash — not a strobe
+  const strokes = makeStrokes(1, mega ? 0.5 : 0.4);
+  bolts.push({
+    cells, strokes, age: 0,
+    life: strokes[strokes.length - 1] + (mega ? 13 : 9) + Math.floor(Math.random() * 5),
+    endCol: col, endRow: row,
+    boost: mega ? 1.6 : 1,
+    lx: cells.length ? cells[0] : col,
+    ly: cells.length ? cells[1] : startRow,
+    rscale: mega ? 1.8 : 1,
+    mega: !!mega,
+  });
+  shake = Math.max(shake, mega ? 9 : 5);
+}
+
+// sheet lightning: no channel — a broad flash inside the deck itself
+function spawnSheet() {
+  const spots = [];
+  for (let i = 0; i < 12; i++) {
+    const cc = Math.floor(COLS * (0.08 + Math.random() * 0.84));
+    for (let rw = Math.floor(ROWS * 0.4); rw >= 0; rw--) {
+      if (visibleCloudAt(cc, rw) > 0.07) { spots.push(cc, Math.max(0, rw - 2)); break; }
+    }
+  }
+  if (!spots.length) return spawnBolt(); // bare sky: fall back to a channel
+  const k = 2 * Math.floor(Math.random() * (spots.length / 2));
+  const strokes = makeStrokes(1, 0.4);
+  bolts.push({
+    cells: [], strokes, age: 0, life: strokes[strokes.length - 1] + 13 + Math.floor(Math.random() * 6),
+    endCol: 0, endRow: 0, boost: 1.25,
+    lx: spots[k], ly: spots[k + 1], rscale: 2.3,
+  });
+  shake = Math.max(shake, 2);
+}
+
+// ---------- render ----------
+let t = 0, emaMs = 0;
+function drawFrame(t) {
+  SKY_CHARGE = stormIntensity(t + 1.1); // sky charges ~1s AHEAD of the discharge → anticipation
+  const buckets = Array.from({ length: N }, () => []);
+  const dust = [];
+  const clouds = Array.from({ length: 32 + LITN }, () => []);
+  // hot bolts (and sheet flashes) light the cloud deck from inside
+  const lights = [];
+  let totalGlow = 0;
+  for (const bolt of bolts) {
+    if (bolt.age >= bolt.life) continue;
+    bolt.bright = boltBright(bolt) * (0.92 + Math.random() * 0.08); // tiny jitter — "occasionally wrong"
+    const glow = bolt.boost * bolt.bright;
+    if (glow > 0.05) { lights.push(bolt.lx, bolt.ly, glow, bolt.rscale || 1); totalGlow += glow; }
+  }
+  // a strike lights the WHOLE cloud deck a little (uniform ambient), on top of
+  // the proximity falloff that lights it far more near the bolt itself
+  const AMBIENT = Math.min(0.09, 0.13 * totalGlow);
+  function lumAt(col, row) { // lightning glow reaching this cell
+    let lum = 0;
+    for (let L = 0; L < lights.length; L += 4) {
+      const rs = lights[L + 3];
+      const ddx = (col - lights[L]) / (COLS * 0.16 * rs);
+      const ddy = (row - lights[L + 1]) / (ROWS * 0.11 * rs);
+      const d2 = ddx * ddx + ddy * ddy;
+      if (d2 < 9) lum += lights[L + 2] * Math.exp(-d2);
+    }
+    return lum;
+  }
+  function pushCloud(deck, v, col, row) {
+    // the vortex's light influences the sky: clouds brighten toward the
+    // funnel's ACTUAL swaying spine, in a cone widest at the cap — and the
+    // lift scales with parallax depth (near decks catch far more light)
+    const yF = row / (ROWS - 1);
+    const sway = (fbm(yF * 2.6 + 3.7, t * 0.26) - 0.5) * (0.14 + 0.32 * yF);
+    const q = (col / COLS - (AXIS0 + sway)) / (0.16 + 0.22 * (1 - yF));
+    v *= 1 + 0.9 * DK[deck][8] * Math.exp(-q * q);
+    v *= 0.9 + 0.2 * SKY_CHARGE; // the whole sky breathes with the charge, gathering before strikes
+    const idx = v > 0.13 ? 3 : v > 0.07 ? 2 : 0.035 < v ? 1 : 0;
+    const base = deck * 4 + idx;
+    // lightning adds light ON TOP of the cloud's own shade: AMBIENT lifts the
+    // whole deck, lumAt ramps it toward the strike — brighter cloud + more
+    // light = brighter still, so shading structure is preserved, not flattened
+    const lum = lumAt(col, row) + AMBIENT;
+    if (lum > 0.04) {
+      const litLum = Math.min(205, CLOUD_LUM[base] + Math.min(1, lum) * 165);
+      const lv = clamp(Math.round((litLum - 34) / (205 - 34) * (LITN - 1)), 0, LITN - 1);
+      clouds[32 + lv].push(col, row);
+    } else {
+      clouds[base].push(col, row);
+    }
+  }
+  const TH = 0.012;
+  for (let row = 0; row < ROWS; row++) {
+    const y = row / (ROWS - 1); // vortex spans the full viewport height
+    const yN = row / ROWS;
+    for (let col = 0; col < COLS; col++) {
+      const xN = col / COLS;
+      let D = null;
+      if (!INVERT && yN < 0.66) { // light mode: no clouds — clean paper behind the vortex
+        D = cloudDecks(xN, yN, t);
+        if (ZONE) { // continuous feather, never a rectangle
+          const mx = sstep(ZONE.x0 - 0.09, ZONE.x0 - 0.01, xN) * (1 - sstep(ZONE.x1 + 0.01, ZONE.x1 + 0.09, xN));
+          const my = sstep(ZONE.y0 - 0.08, ZONE.y0 - 0.01, y) * (1 - sstep(ZONE.y1 + 0.01, ZONE.y1 + 0.08, y));
+          const keep = 1 - mx * my;
+          if (keep < 1) for (let i = 0; i < D.length; i++) D[i] *= keep;
+        }
+        // the two nearest decks are foreground scud: IN FRONT of the vortex cap
+        const fi = D[7] > TH ? 7 : D[6] > TH ? 6 : -1;
+        if (fi >= 0) { pushCloud(fi, D[fi], col, row); continue; }
+      }
+      const d = density(xN, y, t);
+      if (d > 0.02) {
+        const idx = clamp(Math.floor(Math.pow(d, 1.25) * N), 1, N - 1);
+        buckets[idx].push(col, row);
+        continue;
+      }
+      if (D) { // background decks, closest-first occlusion
+        let bi = -1;
+        for (let i = 5; i >= 0; i--) if (D[i] > TH) { bi = i; break; }
+        if (bi >= 0) { pushCloud(bi, D[bi], col, row); continue; }
+      }
+      if (noise(col * 0.55 + t * 0.05, row * 0.55 - t * 0.16) > 0.87) {
+        if (ZONE) { // feathered, probabilistic — no crisp rectangle in the grain
+          const x = col / COLS;
+          const mx = sstep(ZONE.x0 - 0.09, ZONE.x0 - 0.01, x) * (1 - sstep(ZONE.x1 + 0.01, ZONE.x1 + 0.09, x));
+          const my = sstep(ZONE.y0 - 0.08, ZONE.y0 - 0.01, y) * (1 - sstep(ZONE.y1 + 0.01, ZONE.y1 + 0.08, y));
+          if (Math.random() < mx * my) continue;
+        }
+        dust.push(col, row); // faint drifting grain around the funnel
+      }
+    }
+  }
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  for (let lvl = 0; lvl < 32; lvl++) { // base cloud tiers (unlit)
+    const cells = clouds[lvl];
+    if (!cells.length) continue;
+    ctx.fillStyle = CLOUD_C[lvl];
+    const ch = CLOUD_CH[lvl];
+    for (let i = 0; i < cells.length; i += 2) ctx.fillText(ch, cells[i] * cellW, cells[i + 1] * cellH);
+  }
+  for (let lv = 0; lv < LITN; lv++) { // lightning-lit clouds, brightened from their own shade
+    const cells = clouds[32 + lv];
+    if (!cells.length) continue;
+    ctx.fillStyle = LIT_C[lv];
+    const ch = LIT_CH[lv];
+    for (let i = 0; i < cells.length; i += 2) ctx.fillText(ch, cells[i] * cellW, cells[i + 1] * cellH);
+  }
+  ctx.fillStyle = DUST;
+  for (let i = 0; i < dust.length; i += 2) ctx.fillText('·', dust[i] * cellW, dust[i + 1] * cellH);
+  for (let b = 1; b < N; b++) {
+    const cells = buckets[b];
+    if (!cells.length) continue;
+    ctx.fillStyle = COLORS[b];
+    const ch = RAMP[b];
+    for (let i = 0; i < cells.length; i += 2) ctx.fillText(ch, cells[i] * cellW, cells[i + 1] * cellH);
+  }
+  // lightning on top: each return stroke re-flashes the channel, sky and clouds
+  // together — the shared multi-stroke pulse
+  let flash = 0;
+  for (const bolt of bolts) {
+    if (bolt.age >= bolt.life) continue;
+    const br = bolt.bright; // computed in the lights pass above
+    flash = Math.max(flash, Math.min(1.5, bolt.boost * br));
+    if (br > 0.3) { // dim halo widens the channel while a stroke is hot
+      ctx.fillStyle = g(72);
+      for (let j = 0; j < bolt.cells.length; j += 3) {
+        ctx.fillText(bolt.cells[j + 2], (bolt.cells[j] - 1) * cellW, bolt.cells[j + 1] * cellH);
+        ctx.fillText(bolt.cells[j + 2], (bolt.cells[j] + 1) * cellW, bolt.cells[j + 1] * cellH);
+      }
+      if (bolt.mega) { // the big one gets a second, fainter halo ring — a fatter channel
+        ctx.fillStyle = g(40);
+        for (let j = 0; j < bolt.cells.length; j += 3) {
+          ctx.fillText(bolt.cells[j + 2], (bolt.cells[j] - 2) * cellW, bolt.cells[j + 1] * cellH);
+          ctx.fillText(bolt.cells[j + 2], (bolt.cells[j] + 2) * cellW, bolt.cells[j + 1] * cellH);
+        }
+      }
+    }
+    ctx.fillStyle = g(Math.round(60 + 195 * br));
+    for (let j = 0; j < bolt.cells.length; j += 3) {
+      ctx.fillText(bolt.cells[j + 2], bolt.cells[j] * cellW, bolt.cells[j + 1] * cellH);
+      if (bolt.mega && br > 0.4) // mega: double-width white core
+        ctx.fillText(bolt.cells[j + 2], bolt.cells[j] * cellW + cellW * 0.55, bolt.cells[j + 1] * cellH);
+    }
+    if (bolt.age < 6 && bolt.cells.length) { // sparks kicked up at the strike point
+      ctx.fillStyle = g(230);
+      for (let s = 0; s < 5; s++) {
+        const sc = bolt.endCol + Math.round((Math.random() - 0.5) * 7);
+        const sr = bolt.endRow - Math.floor(Math.random() * 3);
+        if (inZone(sc / COLS, sr / (ROWS - 1), 0)) continue;
+        ctx.fillText(SPARKS[Math.floor(Math.random() * 4)], sc * cellW, sr * cellH);
+      }
+    }
+  }
+  // dark mode: white sky-flash. light mode: the paper darkens as the bolt discharges.
+  flashEl.style.opacity = flash > 0.02 ? ((INVERT ? 0.16 : 0.22) * flash).toFixed(3) : 0;
+}
+
+// ---------- 30 fps loop ----------
+const FRAME = 1000 / 30;
+let last = 0;
+const still = matchMedia('(prefers-reduced-motion: reduce)').matches;
+function loop(now) {
+  requestAnimationFrame(loop);
+  if (now - last < FRAME) return;
+  // reduced motion: the storm stays frozen, but a requested strike still plays out
+  if (still && !bolts.length && !shake) return;
+  last = now;
+  if (!still) {
+    t += 1 / 30;
+    if (!INVERT) { // no lightning in light mode — paper stays calm
+      // strike timing: a 1/f storm clock sets the mood (surges & long lulls you
+      // half-anticipate), Hawkes self-excitation clusters strikes (one begets the
+      // next), a refractory gap prevents machine-gunning. Never repeats, never
+      // metronomic — the band that reads as real rather than uncanny.
+      const storm = stormIntensity(t);
+      excite *= 0.93; // self-excitation decays (~0.3s half-life)
+      if (refractory > 0) {
+        refractory--;
+      } else if (Math.random() < storm * (0.35 + excite) * 0.055) {
+        // sheet flashes murmur through the lulls; channels punch through surges
+        (storm < 0.5 && Math.random() < 0.6) ? spawnSheet() : spawnBolt();
+        excite += 0.55;                              // this strike primes the next
+        refractory = 6 + Math.floor(Math.random() * 8);
+      }
+    }
+  }
+  for (let i = bolts.length - 1; i >= 0; i--) {
+    if (++bolts[i].age >= bolts[i].life) bolts.splice(i, 1);
+  }
+  if (shake > 0) { // a jolt through the storm on strike
+    shake--;
+    canvas.style.transform = shake
+      ? `translate(${((Math.random() - 0.5) * 5).toFixed(1)}px, ${((Math.random() - 0.5) * 4).toFixed(1)}px)`
+      : '';
+  }
+  drawFrame(t);
+}
+
+// the button: one mega-bolt per press, spam-friendly (dark mode only)
+const strikeEl = document.getElementById('strike');
+strikeEl.addEventListener('click', () => { if (!INVERT) spawnBolt(true); });
+
+// follow the viewer's theme: the in-page toggle and the artifact toggle both
+// stamp data-theme on <html>, and the OS preference drives the media query —
+// read whichever wins.
+const themeBtn = document.getElementById('theme');
+function readTheme() {
+  INVERT = getComputedStyle(document.documentElement).getPropertyValue('--is-dark').trim() === '0';
+  flashEl.style.background = INVERT ? '#0a0a0a' : '#ffffff';
+  themeBtn.textContent = INVERT ? 'dark' : 'light'; // label = the mode you'd switch TO
+  strikeEl.style.display = INVERT ? 'none' : '';     // no lightning → no button in light mode
+  if (INVERT) { bolts.length = 0; flashEl.style.opacity = 0; } // clear any in-flight storm
+  rebuildPalette();
+  drawFrame(t);
+}
+themeBtn.addEventListener('click', () => {
+  const next = INVERT ? 'dark' : 'light';
+  document.documentElement.setAttribute('data-theme', next);
+  try { localStorage.setItem('fj-theme', next); } catch (e) {}
+});
+try { const saved = localStorage.getItem('fj-theme'); if (saved) document.documentElement.setAttribute('data-theme', saved); } catch (e) {}
+new MutationObserver(readTheme).observe(document.documentElement,
+  { attributes: true, attributeFilter: ['data-theme', 'style', 'class'] });
+matchMedia('(prefers-color-scheme: light)').addEventListener('change', readTheme);
+
+resize();
+updateZone();
+t = 7; // start mid-storm, not at noise origin
+readTheme(); // sets palette + first draw
+window.addEventListener('load', () => { readTheme(); updateZone(); drawFrame(t); }); // re-measure after final layout
+requestAnimationFrame(loop);
+</script>
+
+</body>
+</html>
