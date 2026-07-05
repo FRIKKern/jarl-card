@@ -659,7 +659,7 @@ function drawFrame(t) {
   for (const bolt of bolts) {
     if (bolt.age >= bolt.life) continue;
     const br = bolt.bright; // computed in the lights pass above
-    flash = Math.max(flash, Math.min(1.5, bolt.boost * br));
+    let vSum = 0, vCnt = 0; // how much foreground cloud covers this bolt's channel
     // intertwined with the sky: the bolt lives at the vortex's z-plane, so the
     // two FOREGROUND scud decks veil the channel where they cross in front —
     // the bolt reads as glimpses woven through the cloud, not a line on top.
@@ -670,13 +670,20 @@ function drawFrame(t) {
       let veil = 1;
       if (r / ROWS < 0.66) {
         const D = cloudDecks(c / COLS, r / ROWS, t);
-        // only decks strictly in front of THIS bolt's plane veil its channel
+        // only decks strictly in front of THIS bolt's plane veil its channel —
+        // and z-distance matters: a deck hugging the bolt's plane covers hard,
+        // a deck far in front of it covers softer
         let fg = 0;
         const bp = bolt.deck ?? VORTEX_Z;
-        for (let i = FRONT_START; i < NDECKS; i++) if (i > bp && D[i] > fg) fg = D[i];
+        for (let i = FRONT_START; i < NDECKS; i++) {
+          if (i <= bp || D[i] <= 0) continue;
+          const w = D[i] / (1 + 0.5 * Math.max(0, (i - bp) * ZS - ZS));
+          if (w > fg) fg = w;
+        }
         veil = fg <= 0.012 ? 1 : Math.max(0, 1 - (fg - 0.012) * 9);
+        vSum += veil; vCnt++;
         if (veil < 0.1) continue; // buried inside dense foreground cloud
-      }
+      } else { vSum++; vCnt++; }
       if (br > 0.3) { // dim halo widens the channel while a stroke is hot
         ctx.fillStyle = g(Math.round(72 * veil));
         ctx.fillText(ch, (c - 1) * cellW, r * cellH);
@@ -692,6 +699,10 @@ function drawFrame(t) {
       if (bolt.mega && br > 0.4) // mega: double-width white core
         ctx.fillText(ch, c * cellW + cellW * 0.55, r * cellH);
     }
+    // the screen-wide sky flash is covered by whatever cloud sits in front of
+    // the bolt: mostly-buried channel → dimmer overlay flash (never fully dark)
+    const cover = vCnt ? vSum / vCnt : 1;
+    flash = Math.max(flash, Math.min(1.5, bolt.boost * br) * (0.4 + 0.6 * cover));
     if (bolt.age < 6 && bolt.cells.length) { // sparks kicked up at the strike point
       ctx.fillStyle = g(230);
       for (let s = 0; s < 5; s++) {
