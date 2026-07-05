@@ -882,7 +882,8 @@ canvas.addEventListener('mousedown', e => {
 });
 canvas.addEventListener('mouseup', e => {
   if (!HOLD_T0) return;
-  const charge = 1 - Math.exp(-(performance.now() - HOLD_T0) / 1000);
+  const held = (performance.now() - HOLD_T0) / 1000;
+  const charge = 1 - Math.exp(-held);
   HOLD_T0 = 0;
   if (INVERT) return;
   const { col, row } = cellAt(e); // discharge from wherever the cursor is NOW
@@ -890,6 +891,19 @@ canvas.addEventListener('mouseup', e => {
   const monster = charge > 0.85; // a held-to-the-end strike goes full mega
   spawnBolt(monster, { col, row: Math.max(0, row - 1) }, undefined, charge);
   reportStrike(col / COLS, row / ROWS, monster);
+  // holding buys COUNT too: ~2s → 2 bolts, ≥3s → 3. The extras strike random
+  // clouds like the button does — and the anti-repeat origin memory naturally
+  // pushes them away from the first. Their timing is a random rhythm: usually
+  // staggered after one another, sometimes landing together.
+  const extras = Math.min(3, Math.max(1, Math.floor(held))) - 1;
+  for (let i = 0; i < extras; i++) {
+    const delay = Math.random() < 0.25 ? 0 : 150 + Math.random() * 850;
+    setTimeout(() => {
+      if (INVERT) return;
+      const b = spawnBolt(monster, undefined, undefined, charge);
+      if (b) reportStrike(b.lx / COLS, b.ly / ROWS, monster);
+    }, delay);
+  }
 });
 
 // cursor tracking for the hover highlight; over an armed cloud the OS cursor
