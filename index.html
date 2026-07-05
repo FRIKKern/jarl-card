@@ -173,6 +173,15 @@ let INVERT = false;
 // are dropped entirely in light mode, so this only tones the vortex/lightning).
 const tone = v => INVERT ? 255 - v : v;
 const g = v => { v = tone(v); return `rgb(${v},${v},${v})`; };
+// each visit draws a random accent hue: the name and every DISCHARGE (bolts,
+// lit clouds, sparks, cursor buzz) carry it — the storm itself stays B&W.
+// Saturation tapers at the extremes so white-hot stays near-white.
+const HUE = Math.floor(Math.random() * 360);
+const ac = (v, s = 75) => {
+  const tv = clamp(Math.round(tone(v)), 0, 255);
+  const sat = Math.round(s * (1 - Math.abs(tv - 140) / 140 * 0.6));
+  return `hsl(${HUE} ${sat}% ${Math.round(tv / 255 * 100)}%)`;
+};
 const COLOR_LUM = Array.from({ length: N }, (_, i) => Math.round(lerp(0x1d, 0xf4, Math.pow(i / (N - 1), 0.9))));
 const DUST_LUM = 0x15;
 let COLORS = [], DUST = '';
@@ -245,7 +254,7 @@ let LIT_C = [];
 function rebuildPalette() {
   COLORS = COLOR_LUM.map(g);
   CLOUD_C = CLOUD_LUM.map(g);
-  LIT_C = LIT_LUM.map(g);
+  LIT_C = LIT_LUM.map(v => ac(v, 80)); // lit clouds glow in the visit's accent
   DUST = g(DUST_LUM);
 }
 
@@ -711,16 +720,16 @@ function drawFrame(t) {
         if (veil < 0.1) continue; // buried inside dense foreground cloud
       } else { vSum++; vCnt++; }
       if (br > 0.3) { // dim halo widens the channel while a stroke is hot
-        ctx.fillStyle = g(Math.round(72 * veil));
+        ctx.fillStyle = ac(Math.round(72 * veil), 85);
         ctx.fillText(ch, (c - 1) * cellW, r * cellH);
         ctx.fillText(ch, (c + 1) * cellW, r * cellH);
         if (bolt.mega) { // the big one gets a second, fainter halo ring
-          ctx.fillStyle = g(Math.round(40 * veil));
+          ctx.fillStyle = ac(Math.round(40 * veil), 85);
           ctx.fillText(ch, (c - 2) * cellW, r * cellH);
           ctx.fillText(ch, (c + 2) * cellW, r * cellH);
         }
       }
-      ctx.fillStyle = g(Math.round(vCore * veil));
+      ctx.fillStyle = ac(Math.round(vCore * veil), 45); // near-white core, accent-warmed
       ctx.fillText(ch, c * cellW, r * cellH);
       if (bolt.mega && br > 0.4) // mega: double-width white core
         ctx.fillText(ch, c * cellW + cellW * 0.55, r * cellH);
@@ -730,7 +739,7 @@ function drawFrame(t) {
     const cover = vCnt ? vSum / vCnt : 1;
     flash = Math.max(flash, Math.min(1.5, bolt.boost * br) * (0.4 + 0.6 * cover));
     if (bolt.age < 6 && bolt.cells.length) { // sparks kicked up at the strike point
-      ctx.fillStyle = g(230);
+      ctx.fillStyle = ac(230, 70);
       for (let s = 0; s < 5; s++) {
         const sc = bolt.endCol + Math.round((Math.random() - 0.5) * 7);
         const sr = bolt.endRow - Math.floor(Math.random() * 3);
@@ -744,14 +753,14 @@ function drawFrame(t) {
   // static-electric buzz), plus fading embers along the recent path
   if (!INVERT && MX >= 0) {
     for (let s = 0; s < 3; s++) {
-      ctx.fillStyle = g(120 + Math.floor(Math.random() * 135));
+      ctx.fillStyle = ac(120 + Math.floor(Math.random() * 135), 85);
       ctx.fillText('·+*x'[Math.floor(Math.random() * 4)],
         (MX + (Math.random() - 0.5) * 0.8) * cellW,
         (MY + (Math.random() - 0.5) * 0.8) * cellH);
     }
     for (let s = 3; s < Math.min(TRAIL.length, 15); s += 3) {
       if (Math.random() < 0.5) continue;
-      ctx.fillStyle = g(Math.round(140 * Math.pow(0.7, s / 3)));
+      ctx.fillStyle = ac(Math.round(140 * Math.pow(0.7, s / 3)), 85);
       ctx.fillText('·', TRAIL[s] * cellW, TRAIL[s + 1] * cellH);
     }
   }
@@ -890,7 +899,12 @@ function readTheme() {
   INVERT = dt ? dt === 'light'
          : v  ? v === '0'
          : matchMedia('(prefers-color-scheme: light)').matches;
-  flashEl.style.background = INVERT ? '#0a0a0a' : '#ffffff';
+  flashEl.style.background = INVERT ? '#0a0a0a' : `hsl(${HUE} 60% 86%)`; // the flash carries the accent
+  // "me": the name lights up in the visit's accent — glowing in the dark theme,
+  // deep ink-of-that-hue on paper
+  const nameEl = document.querySelector('.card h1');
+  nameEl.style.color = INVERT ? `hsl(${HUE} 60% 32%)` : `hsl(${HUE} 72% 66%)`;
+  nameEl.style.textShadow = INVERT ? 'none' : `0 0 26px hsl(${HUE} 85% 60% / 0.38)`;
   themeBtn.textContent = INVERT ? 'dark' : 'light'; // label = the mode you'd switch TO
   strikeEl.style.display = INVERT ? 'none' : '';     // no lightning → no button in light mode
   canvas.style.cursor = 'default'; // crosshair appears only over an armed (hovered) cloud
