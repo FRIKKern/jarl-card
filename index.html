@@ -195,9 +195,9 @@ const DK = Array.from({ length: NDECKS }, (_, i) => {
   //  - most decks: tiny fast wisps (high frequency, high coverage threshold)
   //  - the last few (nearest): occasional LARGER shapes, rarer still
   const big = u > 0.75, v = big ? (u - 0.75) / 0.25 : u / 0.75;
-  const fx  = big ? lerp(2.4, 1.6, v) : lerp(9.5, 6.0, v); // nearest decks: properly LARGE shapes
-  const fy  = big ? lerp(3.2, 2.2, v) : lerp(12.0, 8.0, v);
-  const cov = big ? lerp(0.76, 0.79, v) : lerp(0.70, 0.76, v); // small wisps ~40% rarer
+  const fx  = big ? lerp(2.4, 1.6, v) : lerp(7.0, 4.8, v); // nearest decks: properly LARGE shapes
+  const fy  = big ? lerp(3.2, 2.2, v) : lerp(9.2, 6.4, v);
+  const cov = big ? lerp(0.76, 0.79, v) : lerp(0.77, 0.81, v); // small wisps: rare, quiet visitors
   return [fx, lerp(0.55, 1.05, u), fy, lerp(0.045, 0.070, u),
           11 + i * 41, cov, 0.03, lerp(0.32, 0.16, u), lerp(0.95, 1.20, u)];
 });
@@ -210,8 +210,10 @@ for (let i = 0; i < NDECKS; i++) {
               : u < 0.25 ? ['(', '(', 't', 'x']
               : u < 0.45 ? ['(', 't', 'x', 'u']
               : ['t', 'x', 'u', 'c'];
+  const uf = i >= FRONT_START ? (i - FRONT_START) / (NDECKS - 1 - FRONT_START) : 0;
   let dense = i >= FRONT_START
-    ? Math.round(lerp(112, 130, (i - FRONT_START) / (NDECKS - 1 - FRONT_START)))
+    // small front wisps sit QUIET (dim); only the big nearest decks run bright
+    ? Math.round(uf > 0.75 ? lerp(118, 132, (uf - 0.75) / 0.25) : lerp(88, 98, uf / 0.75))
     : Math.round(lerp(29, 100, Math.pow(i / (FRONT_START - 1), 1.15)));
   // the vortex's own glow: decks whose z sits near the vortex plane run a bit
   // lighter, fading with z-distance on BOTH sides — the funnel lights its sky
