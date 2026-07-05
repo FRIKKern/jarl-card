@@ -220,8 +220,8 @@ let CLOUD_C = []; // themed cloud colors, rebuilt on theme change
 // lit-cloud ramp: a strike brightens each cloud FROM ITS OWN base shade into
 // this fine ramp, so depth/density differences survive being lit — a dense
 // cloud lit stays brighter than a wisp lit at the same distance.
-const LITN = 14;
-const LIT_LUM = Array.from({ length: LITN }, (_, k) => Math.round(lerp(34, 205, k / (LITN - 1))));
+const LITN = 16; // spans silhouette-dark (cloaked, backlit) up to white-hot
+const LIT_LUM = Array.from({ length: LITN }, (_, k) => Math.round(lerp(8, 205, k / (LITN - 1))));
 const LIT_CH = Array.from({ length: LITN }, (_, k) => RAMP[clamp(Math.round(lerp(4, 18, k / (LITN - 1))), 1, N - 1)]);
 let LIT_C = [];
 
@@ -242,9 +242,6 @@ function rebuildPalette() {
 // z-distance in both directions. Constant per deck — uniform drift, no shear.
 const VORTEX_Z = 5.5;
 const DECK_SPEED = DK.map((p, i) => 1 + 0.8 / (1 + Math.abs(i - VORTEX_Z)));
-// how much of a strike's WHOLE-DECK flash each deck receives: full at the
-// lightning's own z-plane (the vortex plane), fading with z-distance
-const AMB_GAIN = DK.map((p, i) => 1 / (1 + 0.9 * Math.abs(i - VORTEX_Z)));
 
 const DECKS = new Array(DK.length).fill(0);
 function cloudDecks(colN, rowN, tt) {
@@ -452,7 +449,16 @@ function spawnBolt(mega, at) {
   }
   // one bold strike, occasionally a single dim re-flash — not a strobe
   const strokes = makeStrokes(1, mega ? 0.5 : 0.4);
+  // which deck was struck: the nearest deck with visible cloud at the origin
+  // (the occlusion winner — the cloud you actually see there)
+  let bdeck = 5.5;
+  {
+    const oc = cells.length ? cells[0] : col, or = cells.length ? cells[1] : startRow;
+    const D0 = cloudDecks(oc / COLS, or / ROWS, t);
+    for (let i = D0.length - 1; i >= 0; i--) if (D0[i] > 0.012) { bdeck = i; break; }
+  }
   bolts.push({
+    deck: bdeck,
     cells, strokes, age: 0,
     life: strokes[strokes.length - 1] + (mega ? 13 : 9) + Math.floor(Math.random() * 5),
     endCol: col, endRow: row,
@@ -477,7 +483,13 @@ function spawnSheet() {
   if (!spots.length) return spawnBolt(); // bare sky: fall back to a channel
   const k = 2 * Math.floor(Math.random() * (spots.length / 2));
   const strokes = makeStrokes(1, 0.4);
+  let bdeck = 5.5; // which deck the sheet flash lives in
+  {
+    const D0 = cloudDecks(spots[k] / COLS, spots[k + 1] / ROWS, t);
+    for (let i = D0.length - 1; i >= 0; i--) if (D0[i] > 0.012) { bdeck = i; break; }
+  }
   bolts.push({
+    deck: bdeck,
     cells: [], strokes, age: 0, life: strokes[strokes.length - 1] + 13 + Math.floor(Math.random() * 6),
     endCol: 0, endRow: 0, boost: 1.25,
     lx: spots[k], ly: spots[k + 1], rscale: 2.3,
@@ -492,32 +504,17 @@ function drawFrame(t) {
   const buckets = Array.from({ length: N }, () => []);
   const dust = [];
   const clouds = Array.from({ length: 32 + LITN }, () => []);
-  // hot bolts (and sheet flashes) light the cloud deck from inside
-  const lights = [];
-  let totalGlow = 0;
+  // hot bolts (and sheet flashes) light the cloud decks — each light knows
+  // which DECK it was born in, so lighting can be depth-aware
+  const lights = []; // stride 5: col, row, glow, rscale, sourceDeck
   for (const bolt of bolts) {
     if (bolt.age >= bolt.life) continue;
     bolt.bright = boltBright(bolt) * (0.92 + Math.random() * 0.08); // tiny jitter — "occasionally wrong"
     const glow = bolt.boost * bolt.bright;
-    if (glow > 0.05) { lights.push(bolt.lx, bolt.ly, glow, bolt.rscale || 1); totalGlow += glow; }
+    if (glow > 0.05) lights.push(bolt.lx, bolt.ly, glow, bolt.rscale || 1, bolt.deck ?? 5.5);
   }
-  // a strike lights the WHOLE cloud deck a little (uniform ambient), on top of
-  // the proximity falloff that lights it far more near the bolt itself
-  const AMBIENT = Math.min(0.24, 0.32 * totalGlow);
-  // the cursor's charge: a small breathing light — local glow only, so it is
-  // added AFTER totalGlow and never lifts the whole deck
-  if (!INVERT && MX >= 0) lights.push(MX, MY, 0.20 + 0.05 * Math.sin(t * 2.3), 0.75);
-  function lumAt(col, row) { // lightning glow reaching this cell
-    let lum = 0;
-    for (let L = 0; L < lights.length; L += 4) {
-      const rs = lights[L + 3];
-      const ddx = (col - lights[L]) / (COLS * 0.16 * rs);
-      const ddy = (row - lights[L + 1]) / (ROWS * 0.11 * rs);
-      const d2 = ddx * ddx + ddy * ddy;
-      if (d2 < 9) lum += lights[L + 2] * Math.exp(-d2);
-    }
-    return lum;
-  }
+  // the cursor's charge: a small breathing light in front of every deck
+  if (!INVERT && MX >= 0) lights.push(MX, MY, 0.20 + 0.05 * Math.sin(t * 2.3), 0.75, 8);
   function pushCloud(deck, v, col, row) {
     // the vortex's light influences the sky: clouds brighten toward the
     // funnel's ACTUAL swaying spine, in a cone widest at the cap — and the
@@ -529,15 +526,31 @@ function drawFrame(t) {
     v *= 0.9 + 0.2 * SKY_CHARGE; // the whole sky breathes with the charge, gathering before strikes
     const idx = v > 0.13 ? 3 : v > 0.07 ? 2 : 0.035 < v ? 1 : 0;
     const base = deck * 4 + idx;
-    // lightning adds light ON TOP of the cloud's own shade, in two parts:
-    //  - proximity glow (lumAt), scaled by the deck's viewer-depth gain p[8]
-    //  - whole-deck flash (AMBIENT), scaled by the deck's Z-DISTANCE from the
-    //    lightning's plane — decks adjacent to the bolt light up entirely,
-    //    the deep backdrop barely stirs. That z-falloff IS the 3D read.
-    const lum = lumAt(col, row) * DK[deck][8] + AMBIENT * AMB_GAIN[deck];
-    if (lum > 0.04) {
-      const litLum = Math.min(205, CLOUD_LUM[base] + Math.min(1, lum) * 165);
-      const lv = clamp(Math.round((litLum - 34) / (205 - 34) * (LITN - 1)), 0, LITN - 1);
+    // lightning, depth-aware, three effects per light source:
+    //  1. hot-core glow: tight radial burn near the channel (viewer-depth gain)
+    //  2. cloud-body light: the STRUCK deck lifts as a body (~40% at the bolt),
+    //     neighbors get less by BOTH z-distance between decks AND horizontal
+    //     distance from the strike
+    //  3. cloak: decks IN FRONT of the bolt are backlit — they darken into
+    //     silhouette instead of brightening
+    let lum = 0;
+    for (let L = 0; L < lights.length; L += 5) {
+      const glow = lights[L + 2], rs = lights[L + 3], bd = lights[L + 4];
+      const dxh = (col - lights[L]) / COLS;
+      const dyv = (row - lights[L + 1]) / ROWS;
+      const d2 = (dxh / (0.16 * rs)) ** 2 + (dyv / (0.11 * rs)) ** 2;
+      if (d2 < 9) lum += glow * Math.exp(-d2) * DK[deck][8];       // 1. hot core
+      const h2 = (dxh / 0.24) ** 2 + (dyv / 0.30) ** 2;            // broad body falloff
+      if (h2 < 9) {
+        const spread = Math.exp(-h2);
+        const dz = deck - bd;                                       // + = in front of the bolt
+        if (dz > 0.75) lum -= 0.5 * glow * spread / (1 + 0.6 * (dz - 1));   // 3. cloaked
+        else lum += 0.4 * glow * spread / (1 + 0.75 * Math.abs(dz));        // 2. lit body
+      }
+    }
+    if (lum > 0.035 || lum < -0.035) {
+      const litLum = clamp(Math.round(CLOUD_LUM[base] + clamp(lum, -1, 1) * 165), 8, 205);
+      const lv = clamp(Math.round((litLum - 8) / (205 - 8) * (LITN - 1)), 0, LITN - 1);
       clouds[32 + lv].push(col, row);
     } else {
       clouds[base].push(col, row);
