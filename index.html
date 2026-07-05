@@ -181,17 +181,19 @@ let COLORS = [], DUST = '';
 // Each deck: [xScale, xSpeed, yScale, ySpeed, seed, threshold, reach0, reach1, lightGain]
 // lightGain = how much of any light (vortex, lightning, hover) this deck catches.
 // Front decks carry raised thresholds: rare fast sweeps, not constant cover.
-const NDECKS = 18, FRONT_START = 11;
+const NDECKS = 26, FRONT_START = 16;
 const DK = Array.from({ length: NDECKS }, (_, i) => {
   if (i < FRONT_START) { // behind the vortex: slow deep haze → active storm layer
     // NEGATIVE x-speed = drifts RIGHT — the back of the rotating column, moving
     // opposite the front scud (which streams left), so the sky turns WITH the vortex
     const u = i / (FRONT_START - 1), e = u * u;
-    return [lerp(8.0, 2.4, u), lerp(-0.022, -0.70, e), lerp(7.5, 3.0, u), lerp(-0.010, 0.060, e),
+    return [lerp(8.0, 2.4, u), lerp(-0.016, -0.48, e), lerp(7.5, 3.0, u), lerp(-0.007, 0.042, e),
             11 + i * 41, lerp(0.435, 0.60, e), lerp(0.10, 0.03, u), lerp(0.64, 0.30, u), lerp(0.22, 0.90, u)];
   }
   const u = (i - FRONT_START) / (NDECKS - 1 - FRONT_START); // in front: sparse fast scud
-  return [lerp(2.2, 1.3, u), lerp(0.80, 1.50, u), lerp(2.9, 2.2, u), lerp(0.065, 0.100, u),
+  // ~70% smaller features than a "true near-viewer" deck would have: these read
+  // as hugging the vortex plane (just in front of it), not looming at the camera
+  return [lerp(6.6, 3.9, u), lerp(0.55, 1.05, u), lerp(8.7, 6.6, u), lerp(0.045, 0.070, u),
           11 + i * 41, lerp(0.63, 0.74, u), 0.03, lerp(0.32, 0.16, u), lerp(0.95, 1.20, u)];
 });
 // per-deck glyphs (wisp→dense) and luminances, derived from depth
