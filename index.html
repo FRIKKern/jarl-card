@@ -494,10 +494,15 @@ function spawnSheet() {
   if (!spots.length) return spawnBolt(); // bare sky: fall back to a channel
   const k = 2 * Math.floor(Math.random() * (spots.length / 2));
   const strokes = makeStrokes(1, 0.4);
-  let bdeck = VORTEX_Z; // which deck the sheet flash lives in
+  // the flash lives DEEP inside the stack: of all decks holding cloud at this
+  // spot, bias the pick hard toward the deepest — the layers in front cloak
+  // into silhouette and the glow reads as lightning buried within the cloud
+  let bdeck = VORTEX_Z;
   {
     const D0 = cloudDecks(spots[k] / COLS, spots[k + 1] / ROWS, t);
-    for (let i = D0.length - 1; i >= 0; i--) if (D0[i] > 0.012) { bdeck = i; break; }
+    const cand = [];
+    for (let i = 0; i < D0.length; i++) if (D0[i] > 0.012) cand.push(i);
+    if (cand.length) bdeck = cand[Math.floor(Math.pow(Math.random(), 2.2) * cand.length)];
   }
   bolts.push({
     deck: bdeck,
@@ -754,10 +759,13 @@ function loop(now) {
       if (refractory > 0) {
         refractory--;
       } else if (Math.random() < storm * (0.35 + excite) * 0.055) {
-        // sheet flashes murmur through the lulls; channels punch through surges
-        (storm < 0.5 && Math.random() < 0.6) ? spawnSheet() : spawnBolt();
-        excite += 0.55;                              // this strike primes the next
-        refractory = 6 + Math.floor(Math.random() * 8);
+        // sheet flashes murmur constantly — through lulls AND between the
+        // channel strikes of a surge; channels still punch through surges
+        const sheet = Math.random() < (storm < 0.5 ? 0.8 : 0.4);
+        sheet ? spawnSheet() : spawnBolt();
+        excite += sheet ? 0.35 : 0.55;               // this strike primes the next
+        refractory = sheet ? 3 + Math.floor(Math.random() * 5)
+                           : 6 + Math.floor(Math.random() * 8);
       }
     }
   }
