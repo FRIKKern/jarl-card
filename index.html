@@ -184,8 +184,10 @@ let COLORS = [], DUST = '';
 const NDECKS = 18, FRONT_START = 11;
 const DK = Array.from({ length: NDECKS }, (_, i) => {
   if (i < FRONT_START) { // behind the vortex: slow deep haze → active storm layer
+    // NEGATIVE x-speed = drifts RIGHT — the back of the rotating column, moving
+    // opposite the front scud (which streams left), so the sky turns WITH the vortex
     const u = i / (FRONT_START - 1), e = u * u;
-    return [lerp(8.0, 2.4, u), lerp(0.022, 0.70, e), lerp(7.5, 3.0, u), lerp(-0.010, 0.060, e),
+    return [lerp(8.0, 2.4, u), lerp(-0.022, -0.70, e), lerp(7.5, 3.0, u), lerp(-0.010, 0.060, e),
             11 + i * 41, lerp(0.435, 0.60, e), lerp(0.10, 0.03, u), lerp(0.64, 0.30, u), lerp(0.22, 0.90, u)];
   }
   const u = (i - FRONT_START) / (NDECKS - 1 - FRONT_START); // in front: sparse fast scud
