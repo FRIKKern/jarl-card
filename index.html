@@ -181,7 +181,7 @@ let COLORS = [], DUST = '';
 // Each deck: [xScale, xSpeed, yScale, ySpeed, seed, threshold, reach0, reach1, lightGain]
 // lightGain = how much of any light (vortex, lightning, hover) this deck catches.
 // Front decks carry raised thresholds: rare fast sweeps, not constant cover.
-const NDECKS = 26, FRONT_START = 16;
+const NDECKS = 32, FRONT_START = 19;
 const DK = Array.from({ length: NDECKS }, (_, i) => {
   if (i < FRONT_START) { // behind the vortex: slow deep haze → active storm layer
     // NEGATIVE x-speed = drifts RIGHT — the back of the rotating column, moving
@@ -191,10 +191,15 @@ const DK = Array.from({ length: NDECKS }, (_, i) => {
             11 + i * 41, lerp(0.435, 0.60, e), lerp(0.10, 0.03, u), lerp(0.64, 0.30, u), lerp(0.22, 0.90, u)];
   }
   const u = (i - FRONT_START) / (NDECKS - 1 - FRONT_START); // in front: sparse fast scud
-  // ~70% smaller features than a "true near-viewer" deck would have: these read
-  // as hugging the vortex plane (just in front of it), not looming at the camera
-  return [lerp(6.6, 3.9, u), lerp(0.55, 1.05, u), lerp(8.7, 6.6, u), lerp(0.045, 0.070, u),
-          11 + i * 41, lerp(0.63, 0.74, u), 0.03, lerp(0.32, 0.16, u), lerp(0.95, 1.20, u)];
+  // two front populations, both sparse and hugging the vortex plane:
+  //  - most decks: tiny fast wisps (high frequency, high coverage threshold)
+  //  - the last few (nearest): occasional LARGER shapes, rarer still
+  const big = u > 0.75, v = big ? (u - 0.75) / 0.25 : u / 0.75;
+  const fx  = big ? lerp(3.2, 2.5, v) : lerp(9.5, 6.0, v);
+  const fy  = big ? lerp(4.2, 3.3, v) : lerp(12.0, 8.0, v);
+  const cov = big ? lerp(0.76, 0.79, v) : lerp(0.66, 0.73, v);
+  return [fx, lerp(0.55, 1.05, u), fy, lerp(0.045, 0.070, u),
+          11 + i * 41, cov, 0.03, lerp(0.32, 0.16, u), lerp(0.95, 1.20, u)];
 });
 // per-deck glyphs (wisp→dense) and luminances, derived from depth
 const TIER_F = [0.48, 0.65, 0.82, 1];
@@ -205,9 +210,12 @@ for (let i = 0; i < NDECKS; i++) {
               : u < 0.25 ? ['(', '(', 't', 'x']
               : u < 0.45 ? ['(', 't', 'x', 'u']
               : ['t', 'x', 'u', 'c'];
-  const dense = i >= FRONT_START
+  let dense = i >= FRONT_START
     ? Math.round(lerp(112, 130, (i - FRONT_START) / (NDECKS - 1 - FRONT_START)))
     : Math.round(lerp(29, 100, Math.pow(i / (FRONT_START - 1), 1.15)));
+  // the vortex's own glow: decks whose z sits near the vortex plane run a bit
+  // lighter, fading with z-distance on BOTH sides — the funnel lights its sky
+  dense += Math.round(34 * Math.exp(-(((i - (FRONT_START - 0.5)) * 8 / NDECKS) ** 2) / 1.6));
   for (let k = 0; k < 4; k++) {
     CLOUD_CH.push(chars[k]);
     CLOUD_LUM.push(Math.max(10, Math.round(dense * TIER_F[k])));
