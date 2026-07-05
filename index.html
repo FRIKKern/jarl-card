@@ -882,7 +882,14 @@ if (!still) setTimeout(roleTick, 2600); // reduced motion: stays "Creative Devel
 // read whichever wins.
 const themeBtn = document.getElementById('theme');
 function readTheme() {
-  INVERT = getComputedStyle(document.documentElement).getPropertyValue('--is-dark').trim() === '0';
+  // belt and braces: if the computed custom property can't be read (some
+  // engines return '' for it), fall back to data-theme, then the OS query —
+  // light mode must NEVER accidentally read as dark (buzz/storm would leak in)
+  const dt = document.documentElement.getAttribute('data-theme');
+  const v = getComputedStyle(document.documentElement).getPropertyValue('--is-dark').trim();
+  INVERT = dt ? dt === 'light'
+         : v  ? v === '0'
+         : matchMedia('(prefers-color-scheme: light)').matches;
   flashEl.style.background = INVERT ? '#0a0a0a' : '#ffffff';
   themeBtn.textContent = INVERT ? 'dark' : 'light'; // label = the mode you'd switch TO
   strikeEl.style.display = INVERT ? 'none' : '';     // no lightning → no button in light mode
