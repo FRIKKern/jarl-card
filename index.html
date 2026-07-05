@@ -197,7 +197,7 @@ const DK = Array.from({ length: NDECKS }, (_, i) => {
   const big = u > 0.75, v = big ? (u - 0.75) / 0.25 : u / 0.75;
   const fx  = big ? lerp(3.2, 2.5, v) : lerp(9.5, 6.0, v);
   const fy  = big ? lerp(4.2, 3.3, v) : lerp(12.0, 8.0, v);
-  const cov = big ? lerp(0.76, 0.79, v) : lerp(0.66, 0.73, v);
+  const cov = big ? lerp(0.76, 0.79, v) : lerp(0.70, 0.76, v); // small wisps ~40% rarer
   return [fx, lerp(0.55, 1.05, u), fy, lerp(0.045, 0.070, u),
           11 + i * 41, cov, 0.03, lerp(0.32, 0.16, u), lerp(0.95, 1.20, u)];
 });
