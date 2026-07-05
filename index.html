@@ -612,25 +612,34 @@ function drawFrame(t) {
     if (bolt.age >= bolt.life) continue;
     const br = bolt.bright; // computed in the lights pass above
     flash = Math.max(flash, Math.min(1.5, bolt.boost * br));
-    if (br > 0.3) { // dim halo widens the channel while a stroke is hot
-      ctx.fillStyle = g(72);
-      for (let j = 0; j < bolt.cells.length; j += 3) {
-        ctx.fillText(bolt.cells[j + 2], (bolt.cells[j] - 1) * cellW, bolt.cells[j + 1] * cellH);
-        ctx.fillText(bolt.cells[j + 2], (bolt.cells[j] + 1) * cellW, bolt.cells[j + 1] * cellH);
+    // intertwined with the sky: the bolt lives at the vortex's z-plane, so the
+    // two FOREGROUND scud decks veil the channel where they cross in front —
+    // the bolt reads as glimpses woven through the cloud, not a line on top.
+    // (It still draws over the six background decks: true depth interleaving.)
+    const vCore = 60 + 195 * br;
+    for (let j = 0; j < bolt.cells.length; j += 3) {
+      const c = bolt.cells[j], r = bolt.cells[j + 1], ch = bolt.cells[j + 2];
+      let veil = 1;
+      if (r / ROWS < 0.66) {
+        const D = cloudDecks(c / COLS, r / ROWS, t);
+        const fg = Math.max(D[6], D[7]);
+        veil = fg <= 0.012 ? 1 : Math.max(0, 1 - (fg - 0.012) * 9);
+        if (veil < 0.1) continue; // buried inside dense foreground cloud
       }
-      if (bolt.mega) { // the big one gets a second, fainter halo ring — a fatter channel
-        ctx.fillStyle = g(40);
-        for (let j = 0; j < bolt.cells.length; j += 3) {
-          ctx.fillText(bolt.cells[j + 2], (bolt.cells[j] - 2) * cellW, bolt.cells[j + 1] * cellH);
-          ctx.fillText(bolt.cells[j + 2], (bolt.cells[j] + 2) * cellW, bolt.cells[j + 1] * cellH);
+      if (br > 0.3) { // dim halo widens the channel while a stroke is hot
+        ctx.fillStyle = g(Math.round(72 * veil));
+        ctx.fillText(ch, (c - 1) * cellW, r * cellH);
+        ctx.fillText(ch, (c + 1) * cellW, r * cellH);
+        if (bolt.mega) { // the big one gets a second, fainter halo ring
+          ctx.fillStyle = g(Math.round(40 * veil));
+          ctx.fillText(ch, (c - 2) * cellW, r * cellH);
+          ctx.fillText(ch, (c + 2) * cellW, r * cellH);
         }
       }
-    }
-    ctx.fillStyle = g(Math.round(60 + 195 * br));
-    for (let j = 0; j < bolt.cells.length; j += 3) {
-      ctx.fillText(bolt.cells[j + 2], bolt.cells[j] * cellW, bolt.cells[j + 1] * cellH);
+      ctx.fillStyle = g(Math.round(vCore * veil));
+      ctx.fillText(ch, c * cellW, r * cellH);
       if (bolt.mega && br > 0.4) // mega: double-width white core
-        ctx.fillText(bolt.cells[j + 2], bolt.cells[j] * cellW + cellW * 0.55, bolt.cells[j + 1] * cellH);
+        ctx.fillText(ch, c * cellW + cellW * 0.55, r * cellH);
     }
     if (bolt.age < 6 && bolt.cells.length) { // sparks kicked up at the strike point
       ctx.fillStyle = g(230);
