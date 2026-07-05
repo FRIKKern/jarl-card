@@ -419,9 +419,9 @@ function visibleCloudAt(col, row) {
 }
 
 const RECENT_COLS = []; // last few strike origins — new bolts steer AWAY from them
-function spawnBolt(mega, at, remoteHue) {
+function spawnBolt(mega, at, remoteHue, charge = 0) {
   const cells = [];
-  const forkChance = mega ? 0.24 : 0.07;
+  const forkChance = (mega ? 0.24 : 0.07) + 0.15 * charge;
   let col, startRow;
   if (at) { // caller pinned the origin (e.g. a pressed cloud)
     col = at.col;
@@ -506,19 +506,19 @@ function spawnBolt(mega, at, remoteHue) {
   const bolt = {
     deck: bdeck,
     cells, strokes, age: 0,
-    life: strokes[strokes.length - 1] + (mega ? 13 : 9) + Math.floor(Math.random() * 5),
+    life: strokes[strokes.length - 1] + (mega ? 13 : 9) + Math.round(6 * charge) + Math.floor(Math.random() * 5),
     endCol: col, endRow: row,
-    boost: remoteHue != null ? 0.8 : mega ? 1.6 : 1, // remote strikes: slightly ghosted
+    boost: (remoteHue != null ? 0.8 : mega ? 1.6 : 1) * (1 + 1.1 * charge), // remote: ghosted; held: mightier
     lx: cells.length ? cells[0] : col,
     ly: cells.length ? cells[1] : startRow,
-    rscale: mega ? 1.8 : 1,
+    rscale: (mega ? 1.8 : 1) * (1 + 0.9 * charge),
     mega: !!mega,
     // hue: which color the channel discharges in. YOUR strikes = your accent,
     // a remote visitor's strike = THEIR accent, ambient storm = white (null).
     hue: remoteHue != null ? remoteHue : mega || at ? HUE : null,
   };
   bolts.push(bolt);
-  shake = Math.max(shake, mega ? 9 : remoteHue != null ? 3 : 5);
+  shake = Math.max(shake, Math.round((mega ? 9 : remoteHue != null ? 3 : 5) + 5 * charge));
   return bolt;
 }
 
@@ -558,6 +558,14 @@ let t = 0, emaMs = 0;
 function drawFrame(t) {
   SKY_CHARGE = stormIntensity(t + 1.1); // sky charges ~1s AHEAD of the discharge → anticipation
   BUZZ = 0.78 + 0.32 * Math.random();   // the cursor's electric flicker, shared by spot + trail
+  // hold-to-charge: exponential approach to full charge (~95% at 3s) — fast
+  // at first, ever slower, the longer you hold the greater the lightning.
+  CHG = HOLD_T0 ? 1 - Math.exp(-(performance.now() - HOLD_T0) / 1000) : 0;
+  // the spot SWELLS through mid-charge, then CONDENSES tighter than rest as
+  // the charge completes — gathering itself before the strike
+  const chgBulge = 4 * CHG * (1 - CHG);
+  SPOT_MUL = (1 + 1.6 * chgBulge) * (1 - 0.45 * CHG);
+  SPOT_POW = 1 + 1.6 * CHG + 0.35 * CHG * (Math.random() - 0.5); // hotter + more nervous
   const buckets = Array.from({ length: N }, () => []);
   const dust = [];
   const clouds = Array.from({ length: CBASE + LITN * 2 }, () => []); // + white-lit + accent-lit buckets
@@ -623,11 +631,11 @@ function drawFrame(t) {
     for (let s = 0; s < TRAIL.length; s += 3) {
       if (TRAIL[s + 2] !== deck) continue;
       const k = s / 3;
-      const str = 0.55 * BUZZ * Math.pow(0.66, k);
+      const str = 0.55 * SPOT_POW * BUZZ * Math.pow(0.66, k);
       if (str < 0.04) break;
       const rr = 1 + 0.12 * k; // older samples spread: the blur
       const dxh = (col - TRAIL[s]) / COLS, dyv = (row - TRAIL[s + 1]) / ROWS;
-      const hh = (dxh / (0.007 * rr)) ** 2 + (dyv / (0.0095 * rr)) ** 2;
+      const hh = (dxh / (0.010 * rr * SPOT_MUL)) ** 2 + (dyv / (0.013 * rr * SPOT_MUL)) ** 2;
       if (hh < 4) { const add = str * Math.exp(-hh * hh); lum += add; pos += add; posT += add; } // buzz = your color
     }
     if (lum > 0.035 || lum < -0.035) {
@@ -778,11 +786,12 @@ function drawFrame(t) {
   // the cursor tip itself: tiny crackle glyphs jittering at the point (the
   // static-electric buzz), plus fading embers along the recent path
   if (!INVERT && MX >= 0) {
-    for (let s = 0; s < 3; s++) {
+    const nCr = 3 + Math.round(6 * CHG), rCr = 0.8 + 1.6 * CHG;
+    for (let s = 0; s < nCr; s++) {
       ctx.fillStyle = ac(120 + Math.floor(Math.random() * 135), 55);
       ctx.fillText('·+*x'[Math.floor(Math.random() * 4)],
-        (MX + (Math.random() - 0.5) * 0.8) * cellW,
-        (MY + (Math.random() - 0.5) * 0.8) * cellH);
+        (MX + (Math.random() - 0.5) * rCr) * cellW,
+        (MY + (Math.random() - 0.5) * rCr) * cellH);
     }
     for (let s = 3; s < Math.min(TRAIL.length, 15); s += 3) {
       if (Math.random() < 0.5) continue;
@@ -852,21 +861,39 @@ strikeEl.addEventListener('click', () => {
   if (b) reportStrike(b.lx / COLS, b.ly / ROWS, true);
 });
 
-// lightning REQUIRES a hovered cloud: a strike only fires from a point with
-// visible cloud under it — the hover highlight shows which cloud is armed
-canvas.addEventListener('click', e => {
-  if (INVERT) return;
+// lightning REQUIRES a hovered cloud — and now it CHARGES: press and hold on
+// a cloud and the spotlight swells, condenses and crackles as charge builds
+// (exponential, ~full at 3s); release to discharge. A quick tap is a small
+// bolt, a full hold is a monster.
+function cellAt(e) {
   const rect = canvas.getBoundingClientRect();
-  const col = clamp(Math.round((e.clientX - rect.left) / cellW), 1, COLS - 2);
-  const row = Math.max(0, Math.round((e.clientY - rect.top) / cellH));
-  if (visibleCloudAt(col, row) <= 0.012) return; // bare sky: nothing to discharge
-  spawnBolt(false, { col, row: Math.max(0, row - 1) });
-  reportStrike(col / COLS, row / ROWS, false);
+  return {
+    col: clamp(Math.round((e.clientX - rect.left) / cellW), 1, COLS - 2),
+    row: Math.max(0, Math.round((e.clientY - rect.top) / cellH)),
+  };
+}
+canvas.addEventListener('mousedown', e => {
+  if (INVERT || e.button !== 0) return;
+  const { col, row } = cellAt(e);
+  if (visibleCloudAt(col, row) <= 0.012) return; // bare sky: nothing to charge
+  HOLD_T0 = performance.now();
+});
+canvas.addEventListener('mouseup', e => {
+  if (!HOLD_T0) return;
+  const charge = 1 - Math.exp(-(performance.now() - HOLD_T0) / 1000);
+  HOLD_T0 = 0;
+  if (INVERT) return;
+  const { col, row } = cellAt(e); // discharge from wherever the cursor is NOW
+  if (visibleCloudAt(col, row) <= 0.012) return;
+  const monster = charge > 0.85; // a held-to-the-end strike goes full mega
+  spawnBolt(monster, { col, row: Math.max(0, row - 1) }, undefined, charge);
+  reportStrike(col / COLS, row / ROWS, monster);
 });
 
 // cursor tracking for the hover highlight; over an armed cloud the OS cursor
 // vanishes entirely — the electric spotlight + crackle IS the cursor there
 let MX = -1, MY = -1, HOVER_DECK = -1;
+let HOLD_T0 = 0, CHG = 0, SPOT_MUL = 1, SPOT_POW = 1; // hold-to-charge state
 let TRAIL = [], BUZZ = 1; // recent cursor samples [x, y, deck, ...] for the blur trail
 canvas.addEventListener('mousemove', e => {
   const rect = canvas.getBoundingClientRect();
@@ -875,7 +902,7 @@ canvas.addEventListener('mousemove', e => {
   canvas.style.cursor = (!INVERT && visibleCloudAt(Math.round(MX), Math.round(MY)) > 0.012)
     ? 'none' : 'default';
 });
-canvas.addEventListener('mouseleave', () => { MX = MY = -1; HOVER_DECK = -1; });
+canvas.addEventListener('mouseleave', () => { MX = MY = -1; HOVER_DECK = -1; HOLD_T0 = 0; });
 
 // typewriter: the role line slowly loses its composure, then repeats.
 // updateZone() after every character so the storm keeps dodging the text.
