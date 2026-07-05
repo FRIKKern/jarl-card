@@ -401,6 +401,7 @@ function visibleCloudAt(col, row) {
   return v;
 }
 
+const RECENT_COLS = []; // last few strike origins — new bolts steer AWAY from them
 function spawnBolt(mega, at) {
   const cells = [];
   const forkChance = mega ? 0.24 : 0.07;
@@ -411,7 +412,9 @@ function spawnBolt(mega, at) {
   } else {
     // strike from VISIBLE cloud, always: a column qualifies only if it has a
     // cloud base that actually renders (zone feather applied, wisp tiers too
-    // faint to count) — then pick any qualifying column at random
+    // faint to count). The slow sky barely changes between button presses, so
+    // random-among-qualifying repeats — instead score candidates by distance
+    // from RECENT origins (plus a dash of chaos) and take the best
     const candidates = [];
     for (let i = 0; i < 24; i++) {
       const c = Math.floor(COLS * (0.08 + Math.random() * 0.84));
@@ -420,14 +423,22 @@ function spawnBolt(mega, at) {
       }
     }
     if (candidates.length) {
-      const k = 2 * Math.floor(Math.random() * (candidates.length / 2));
-      col = candidates[k];
-      startRow = Math.max(0, candidates[k + 1] - 2); // start inside the deck
+      let bi = 0, bs = -1;
+      for (let j = 0; j < candidates.length; j += 2) {
+        let dmin = COLS;
+        for (const rc of RECENT_COLS) dmin = Math.min(dmin, Math.abs(candidates[j] - rc));
+        const score = dmin + Math.random() * COLS * 0.18;
+        if (score > bs) { bs = score; bi = j; }
+      }
+      col = candidates[bi];
+      startRow = Math.max(0, candidates[bi + 1] - 2 - Math.floor(Math.random() * 3)); // varied depth inside the deck
     } else { // genuinely bare sky: strike from the top of the frame
       col = Math.floor(COLS * (0.2 + Math.random() * 0.6));
       startRow = 0;
     }
   }
+  RECENT_COLS.push(col);
+  if (RECENT_COLS.length > 4) RECENT_COLS.shift();
   let endRow = Math.floor(ROWS * ((mega ? 0.75 : 0.62) + Math.random() * (mega ? 0.23 : 0.34)));
   if (at) // pressed origins can sit low — always leave the bolt room to travel
     endRow = Math.min(ROWS - 2, Math.max(endRow, startRow + 6 + Math.floor(Math.random() * 8)));
@@ -436,10 +447,13 @@ function spawnBolt(mega, at) {
     x0: (ZONE.x0 - 0.03) * COLS, x1: (ZONE.x1 + 0.03) * COLS,
     y0: ZONE.y0 * (ROWS - 1),    y1: ZONE.y1 * (ROWS - 1) + 2,
   } : null;
+  // per-bolt lean: each channel tilts left or right AS A WHOLE, so two strikes
+  // from the same cloud still cut different diagonals across the sky
+  const lean = (Math.random() - 0.5) * (mega ? 0.30 : 0.22);
   let row = startRow;
   for (; row < endRow; row++) {
     const turn = Math.random();
-    let drift = turn < 0.28 ? -1 : turn < 0.56 ? 1 : 0;
+    let drift = turn < 0.28 - lean ? -1 : turn < 0.56 + lean ? 1 : 0;
     if (Math.random() < 0.10) drift *= 2; // hard jag
     if (mega && Math.random() < 0.28) drift *= 2; // mega wanders wider across the sky
     if (z && row >= z.y0 - 5 && row <= z.y1) {
