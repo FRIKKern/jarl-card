@@ -513,8 +513,14 @@ function drawFrame(t) {
     const glow = bolt.boost * bolt.bright;
     if (glow > 0.05) lights.push(bolt.lx, bolt.ly, glow, bolt.rscale || 1, bolt.deck ?? 5.5);
   }
-  // the cursor's charge: a small breathing light in front of every deck
-  if (!INVERT && MX >= 0) lights.push(MX, MY, 0.20 + 0.05 * Math.sin(t * 2.3), 0.75, 8);
+  // hover: which cloud (occlusion-winning deck) is under the cursor right now?
+  // That cloud gets a ~10% lift, and only a hovered cloud can be struck.
+  HOVER_DECK = -1;
+  if (!INVERT && MX >= 0 && MY / ROWS < 0.66) {
+    if (visibleCloudAt(Math.round(MX), Math.round(MY)) > 0.012) {
+      for (let i = DECKS.length - 1; i >= 0; i--) if (DECKS[i] > 0.012) { HOVER_DECK = i; break; }
+    }
+  }
   function pushCloud(deck, v, col, row) {
     // the vortex's light influences the sky: clouds brighten toward the
     // funnel's ACTUAL swaying spine, in a cone widest at the cap — and the
@@ -547,6 +553,13 @@ function drawFrame(t) {
         if (dz > 0.75) lum -= 0.5 * glow * spread / (1 + 0.6 * (dz - 1));   // 3. cloaked
         else lum += 0.4 * glow * spread / (1 + 0.75 * Math.abs(dz));        // 2. lit body
       }
+    }
+    // hovered cloud: a steady ~10% lift on the deck under the cursor, local
+    // to the blob — the "this one is armed" signal
+    if (deck === HOVER_DECK) {
+      const dxh = (col - MX) / COLS, dyv = (row - MY) / ROWS;
+      const hh = (dxh / 0.14) ** 2 + (dyv / 0.16) ** 2;
+      if (hh < 9) lum += 0.10 * Math.exp(-hh);
     }
     if (lum > 0.035 || lum < -0.035) {
       const litLum = clamp(Math.round(CLOUD_LUM[base] + clamp(lum, -1, 1) * 165), 8, 205);
@@ -716,25 +729,27 @@ function loop(now) {
 const strikeEl = document.getElementById('strike');
 strikeEl.addEventListener('click', () => { if (!INVERT) spawnBolt(true); });
 
-// press ANYWHERE and lightning discharges from that exact point — the whole
-// sky is charged, not just the clouds
+// lightning REQUIRES a hovered cloud: a strike only fires from a point with
+// visible cloud under it — the hover highlight shows which cloud is armed
 canvas.addEventListener('click', e => {
   if (INVERT) return;
   const rect = canvas.getBoundingClientRect();
-  const col = Math.round((e.clientX - rect.left) / cellW);
-  const row = Math.round((e.clientY - rect.top) / cellH);
-  spawnBolt(false, { col: clamp(col, 1, COLS - 2), row: Math.max(0, row - 1) });
+  const col = clamp(Math.round((e.clientX - rect.left) / cellW), 1, COLS - 2);
+  const row = Math.max(0, Math.round((e.clientY - rect.top) / cellH));
+  if (visibleCloudAt(col, row) <= 0.012) return; // bare sky: nothing to discharge
+  spawnBolt(false, { col, row: Math.max(0, row - 1) });
 });
 
-// the cursor itself is a charge: clouds near it glow softly, breathing a
-// little — it rides the same light system as the lightning
-let MX = -1, MY = -1;
+// cursor tracking for the hover highlight; crosshair only when a cloud is armed
+let MX = -1, MY = -1, HOVER_DECK = -1;
 canvas.addEventListener('mousemove', e => {
   const rect = canvas.getBoundingClientRect();
   MX = (e.clientX - rect.left) / cellW;
   MY = (e.clientY - rect.top) / cellH;
+  canvas.style.cursor = (!INVERT && visibleCloudAt(Math.round(MX), Math.round(MY)) > 0.012)
+    ? 'crosshair' : 'default';
 });
-canvas.addEventListener('mouseleave', () => { MX = MY = -1; });
+canvas.addEventListener('mouseleave', () => { MX = MY = -1; HOVER_DECK = -1; });
 
 // typewriter: the role line slowly loses its composure, then repeats.
 // updateZone() after every character so the storm keeps dodging the text.
@@ -787,7 +802,7 @@ function readTheme() {
   flashEl.style.background = INVERT ? '#0a0a0a' : '#ffffff';
   themeBtn.textContent = INVERT ? 'dark' : 'light'; // label = the mode you'd switch TO
   strikeEl.style.display = INVERT ? 'none' : '';     // no lightning → no button in light mode
-  canvas.style.cursor = INVERT ? 'default' : 'crosshair'; // dark mode: the sky is interactive
+  canvas.style.cursor = 'default'; // crosshair appears only over an armed (hovered) cloud
   if (INVERT) { bolts.length = 0; flashEl.style.opacity = 0; } // clear any in-flight storm
   rebuildPalette();
   drawFrame(t);
