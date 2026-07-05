@@ -561,11 +561,12 @@ function drawFrame(t) {
   // hold-to-charge: exponential approach to full charge (~95% at 3s) — fast
   // at first, ever slower, the longer you hold the greater the lightning.
   CHG = HOLD_T0 ? 1 - Math.exp(-(performance.now() - HOLD_T0) / 1000) : 0;
-  // the spot SWELLS through mid-charge, then CONDENSES tighter than rest as
-  // the charge completes — gathering itself before the strike
-  const chgBulge = 4 * CHG * (1 - CHG);
-  SPOT_MUL = (1 + 1.6 * chgBulge) * (1 - 0.45 * CHG);
-  SPOT_POW = 1 + 1.6 * CHG + 0.35 * CHG * (Math.random() - 0.5); // hotter + more nervous
+  // on press the spot BLOOMS large instantly, then shrinks INWARD as the
+  // charge builds — collapsing into an ever tighter, ever more potent point.
+  // The shrink rides the charge's exponential curve: fast at first, slowing
+  // as it compresses toward the final state.
+  SPOT_MUL = HOLD_T0 ? 0.5 + 2.1 * (1 - CHG) : 1;
+  SPOT_POW = 1 + 1.8 * CHG + 0.35 * CHG * (Math.random() - 0.5); // hotter + more nervous
   const buckets = Array.from({ length: N }, () => []);
   const dust = [];
   const clouds = Array.from({ length: CBASE + LITN * 2 }, () => []); // + white-lit + accent-lit buckets
@@ -786,7 +787,8 @@ function drawFrame(t) {
   // the cursor tip itself: tiny crackle glyphs jittering at the point (the
   // static-electric buzz), plus fading embers along the recent path
   if (!INVERT && MX >= 0) {
-    const nCr = 3 + Math.round(6 * CHG), rCr = 0.8 + 1.6 * CHG;
+    // charging: sparks start scattered wide and collapse inward with the spot
+    const nCr = 3 + Math.round(6 * CHG), rCr = HOLD_T0 ? 0.7 + 2.0 * (1 - CHG) : 0.8;
     for (let s = 0; s < nCr; s++) {
       ctx.fillStyle = ac(120 + Math.floor(Math.random() * 135), 55);
       ctx.fillText('·+*x'[Math.floor(Math.random() * 4)],
