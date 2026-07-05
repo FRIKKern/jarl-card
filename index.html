@@ -247,14 +247,15 @@ let CLOUD_C = []; // themed cloud colors, rebuilt on theme change
 const LITN = 16; // spans silhouette-dark (cloaked, backlit) up to white-hot
 const LIT_LUM = Array.from({ length: LITN }, (_, k) => Math.round(lerp(8, 205, k / (LITN - 1))));
 const LIT_CH = Array.from({ length: LITN }, (_, k) => RAMP[clamp(Math.round(lerp(4, 18, k / (LITN - 1))), 1, N - 1)]);
-let LIT_C = [];
+let LIT_C = [], LIT_CA = []; // white ramp (ambient strikes) + accent ramp (YOUR strikes/buzz)
 
 // rebuild every canvas color for the current theme (dark = as authored,
 // light = luminance-flipped to ink-on-paper)
 function rebuildPalette() {
   COLORS = COLOR_LUM.map(g);
   CLOUD_C = CLOUD_LUM.map(g);
-  LIT_C = LIT_LUM.map(v => ac(v, 80)); // lit clouds glow in the visit's accent
+  LIT_C = LIT_LUM.map(g);              // ambient lightning lights clouds WHITE
+  LIT_CA = LIT_LUM.map(v => ac(v, 42)); // your strikes/buzz: gentle accent glow
   DUST = g(DUST_LUM);
 }
 
@@ -505,6 +506,7 @@ function spawnBolt(mega, at) {
     ly: cells.length ? cells[1] : startRow,
     rscale: mega ? 1.8 : 1,
     mega: !!mega,
+    tinted: !!(mega || at), // YOUR strikes carry the accent; ambient stays white
   });
   shake = Math.max(shake, mega ? 9 : 5);
 }
@@ -547,15 +549,15 @@ function drawFrame(t) {
   BUZZ = 0.78 + 0.32 * Math.random();   // the cursor's electric flicker, shared by spot + trail
   const buckets = Array.from({ length: N }, () => []);
   const dust = [];
-  const clouds = Array.from({ length: CBASE + LITN }, () => []);
+  const clouds = Array.from({ length: CBASE + LITN * 2 }, () => []); // + white-lit + accent-lit buckets
   // hot bolts (and sheet flashes) light the cloud decks — each light knows
   // which DECK it was born in, so lighting can be depth-aware
-  const lights = []; // stride 5: col, row, glow, rscale, sourceDeck
+  const lights = []; // stride 6: col, row, glow, rscale, sourceDeck, tinted
   for (const bolt of bolts) {
     if (bolt.age >= bolt.life) continue;
     bolt.bright = boltBright(bolt) * (0.92 + Math.random() * 0.08); // tiny jitter — "occasionally wrong"
     const glow = bolt.boost * bolt.bright;
-    if (glow > 0.05) lights.push(bolt.lx, bolt.ly, glow, bolt.rscale || 1, bolt.deck ?? VORTEX_Z);
+    if (glow > 0.05) lights.push(bolt.lx, bolt.ly, glow, bolt.rscale || 1, bolt.deck ?? VORTEX_Z, bolt.tinted ? 1 : 0);
   }
   // hover: which cloud (occlusion-winning deck) is under the cursor right now?
   // That cloud gets a ~10% lift, and only a hovered cloud can be struck.
@@ -583,23 +585,26 @@ function drawFrame(t) {
     //     distance from the strike
     //  3. cloak: decks IN FRONT of the bolt are backlit — they darken into
     //     silhouette instead of brightening
-    let lum = 0;
-    for (let L = 0; L < lights.length; L += 5) {
+    let lum = 0, pos = 0, posT = 0; // pos/posT: total vs YOUR-strike positive light
+    for (let L = 0; L < lights.length; L += 6) {
       const glow = lights[L + 2], rs = lights[L + 3], bd = lights[L + 4];
       const dxh = (col - lights[L]) / COLS;
       const dyv = (row - lights[L + 1]) / ROWS;
       const dz = (deck - bd) * ZS;                                  // z-distance, classic units
       const d2 = (dxh / (0.16 * rs)) ** 2 + (dyv / (0.11 * rs)) ** 2;
+      let add = 0;
       // 1. hot core — also favors decks near the bolt's own z-plane
-      if (d2 < 9) lum += glow * Math.exp(-d2) * DK[deck][8] / (1 + 0.3 * Math.abs(dz));
+      if (d2 < 9) add += glow * Math.exp(-d2) * DK[deck][8] / (1 + 0.3 * Math.abs(dz));
       const h2 = (dxh / 0.34) ** 2 + (dyv / 0.40) ** 2;            // broad body falloff
       if (h2 < 9) {
         const spread = Math.exp(-h2 * 0.8);                         // flatter top: whole cloud, not a gradient
         if (deck > bd + 0.5) lum -= 0.55 * glow * spread / (1 + 0.6 * Math.max(0, dz - ZS)); // 3. cloaked
         // 2. lit body — z-proximity pops: decks AT the bolt's plane burn brighter,
         //    the bonus decays faster with z so the contrast reads as depth
-        else lum += 0.92 * glow * spread / (1 + 0.85 * Math.abs(dz));
+        else add += 0.92 * glow * spread / (1 + 0.85 * Math.abs(dz));
       }
+      lum += add; pos += add;
+      if (lights[L + 5]) posT += add;
     }
     // hovered cloud: a TINY, razor-sharp electric spotlight — near-full
     // brightness inside a small disc, then a cliff (exp(-h⁴), not a soft
@@ -612,12 +617,13 @@ function drawFrame(t) {
       const rr = 1 + 0.12 * k; // older samples spread: the blur
       const dxh = (col - TRAIL[s]) / COLS, dyv = (row - TRAIL[s + 1]) / ROWS;
       const hh = (dxh / (0.007 * rr)) ** 2 + (dyv / (0.0095 * rr)) ** 2;
-      if (hh < 4) lum += str * Math.exp(-hh * hh);
+      if (hh < 4) { const add = str * Math.exp(-hh * hh); lum += add; pos += add; posT += add; } // buzz = your color
     }
     if (lum > 0.035 || lum < -0.035) {
       const litLum = clamp(Math.round(CLOUD_LUM[base] + clamp(lum, -1, 1) * 165), 8, 205);
       const lv = clamp(Math.round((litLum - 8) / (205 - 8) * (LITN - 1)), 0, LITN - 1);
-      clouds[CBASE + lv].push(col, row);
+      // accent only where YOUR light dominates; ambient strikes stay white
+      clouds[CBASE + (posT * 2 > pos ? LITN + lv : lv)].push(col, row);
     } else {
       clouds[base].push(col, row);
     }
@@ -674,10 +680,17 @@ function drawFrame(t) {
   }
   for (let lv = 0; lv < LITN; lv++) { // lightning-lit clouds, brightened from their own shade
     const cells = clouds[CBASE + lv];
-    if (!cells.length) continue;
-    ctx.fillStyle = LIT_C[lv];
-    const ch = LIT_CH[lv];
-    for (let i = 0; i < cells.length; i += 2) ctx.fillText(ch, cells[i] * cellW, cells[i + 1] * cellH);
+    if (cells.length) {
+      ctx.fillStyle = LIT_C[lv];
+      const ch = LIT_CH[lv];
+      for (let i = 0; i < cells.length; i += 2) ctx.fillText(ch, cells[i] * cellW, cells[i + 1] * cellH);
+    }
+    const acc = clouds[CBASE + LITN + lv]; // cells lit by YOUR strike/buzz: accent
+    if (acc.length) {
+      ctx.fillStyle = LIT_CA[lv];
+      const ch = LIT_CH[lv];
+      for (let i = 0; i < acc.length; i += 2) ctx.fillText(ch, acc[i] * cellW, acc[i + 1] * cellH);
+    }
   }
   ctx.fillStyle = DUST;
   for (let i = 0; i < dust.length; i += 2) ctx.fillText('·', dust[i] * cellW, dust[i + 1] * cellH);
@@ -690,7 +703,7 @@ function drawFrame(t) {
   }
   // lightning on top: each return stroke re-flashes the channel, sky and clouds
   // together — the shared multi-stroke pulse
-  let flash = 0;
+  let flash = 0, flashT = false;
   for (const bolt of bolts) {
     if (bolt.age >= bolt.life) continue;
     const br = bolt.bright; // computed in the lights pass above
@@ -720,16 +733,17 @@ function drawFrame(t) {
         if (veil < 0.1) continue; // buried inside dense foreground cloud
       } else { vSum++; vCnt++; }
       if (br > 0.3) { // dim halo widens the channel while a stroke is hot
-        ctx.fillStyle = ac(Math.round(72 * veil), 85);
+        ctx.fillStyle = bolt.tinted ? ac(Math.round(72 * veil), 55) : g(Math.round(72 * veil));
         ctx.fillText(ch, (c - 1) * cellW, r * cellH);
         ctx.fillText(ch, (c + 1) * cellW, r * cellH);
         if (bolt.mega) { // the big one gets a second, fainter halo ring
-          ctx.fillStyle = ac(Math.round(40 * veil), 85);
+          ctx.fillStyle = bolt.tinted ? ac(Math.round(40 * veil), 55) : g(Math.round(40 * veil));
           ctx.fillText(ch, (c - 2) * cellW, r * cellH);
           ctx.fillText(ch, (c + 2) * cellW, r * cellH);
         }
       }
-      ctx.fillStyle = ac(Math.round(vCore * veil), 45); // near-white core, accent-warmed
+      // core: white; your strikes get only a WHISPER of the accent
+      ctx.fillStyle = bolt.tinted ? ac(Math.round(vCore * veil), 22) : g(Math.round(vCore * veil));
       ctx.fillText(ch, c * cellW, r * cellH);
       if (bolt.mega && br > 0.4) // mega: double-width white core
         ctx.fillText(ch, c * cellW + cellW * 0.55, r * cellH);
@@ -737,9 +751,10 @@ function drawFrame(t) {
     // the screen-wide sky flash is covered by whatever cloud sits in front of
     // the bolt: mostly-buried channel → dimmer overlay flash (never fully dark)
     const cover = vCnt ? vSum / vCnt : 1;
-    flash = Math.max(flash, Math.min(1.5, bolt.boost * br) * (0.4 + 0.6 * cover));
+    const fc = Math.min(1.5, bolt.boost * br) * (0.4 + 0.6 * cover);
+    if (fc > flash) { flash = fc; flashT = !!bolt.tinted; } // the dominant bolt sets the flash's color
     if (bolt.age < 6 && bolt.cells.length) { // sparks kicked up at the strike point
-      ctx.fillStyle = ac(230, 70);
+      ctx.fillStyle = bolt.tinted ? ac(230, 45) : g(230);
       for (let s = 0; s < 5; s++) {
         const sc = bolt.endCol + Math.round((Math.random() - 0.5) * 7);
         const sr = bolt.endRow - Math.floor(Math.random() * 3);
@@ -753,17 +768,19 @@ function drawFrame(t) {
   // static-electric buzz), plus fading embers along the recent path
   if (!INVERT && MX >= 0) {
     for (let s = 0; s < 3; s++) {
-      ctx.fillStyle = ac(120 + Math.floor(Math.random() * 135), 85);
+      ctx.fillStyle = ac(120 + Math.floor(Math.random() * 135), 55);
       ctx.fillText('·+*x'[Math.floor(Math.random() * 4)],
         (MX + (Math.random() - 0.5) * 0.8) * cellW,
         (MY + (Math.random() - 0.5) * 0.8) * cellH);
     }
     for (let s = 3; s < Math.min(TRAIL.length, 15); s += 3) {
       if (Math.random() < 0.5) continue;
-      ctx.fillStyle = ac(Math.round(140 * Math.pow(0.7, s / 3)), 85);
+      ctx.fillStyle = ac(Math.round(140 * Math.pow(0.7, s / 3)), 55);
       ctx.fillText('·', TRAIL[s] * cellW, TRAIL[s + 1] * cellH);
     }
   }
+  if (flash > 0.02) // ambient flash: white. Your strike's flash: a pale wash of your accent
+    flashEl.style.background = INVERT ? '#0a0a0a' : flashT ? `hsl(${HUE} 55% 88%)` : '#ffffff';
   flashEl.style.opacity = flash > 0.02 ? ((INVERT ? 0.16 : 0.22) * flash).toFixed(3) : 0;
 }
 
@@ -899,12 +916,12 @@ function readTheme() {
   INVERT = dt ? dt === 'light'
          : v  ? v === '0'
          : matchMedia('(prefers-color-scheme: light)').matches;
-  flashEl.style.background = INVERT ? '#0a0a0a' : `hsl(${HUE} 60% 86%)`; // the flash carries the accent
-  // "me": the name lights up in the visit's accent — glowing in the dark theme,
-  // deep ink-of-that-hue on paper
+  flashEl.style.background = INVERT ? '#0a0a0a' : '#ffffff';
+  // "me": the name lights up in the visit's accent — a quiet glow in the dark
+  // theme, deep ink-of-that-hue on paper. Understated, not hefty.
   const nameEl = document.querySelector('.card h1');
-  nameEl.style.color = INVERT ? `hsl(${HUE} 60% 32%)` : `hsl(${HUE} 72% 66%)`;
-  nameEl.style.textShadow = INVERT ? 'none' : `0 0 26px hsl(${HUE} 85% 60% / 0.38)`;
+  nameEl.style.color = INVERT ? `hsl(${HUE} 45% 33%)` : `hsl(${HUE} 48% 64%)`;
+  nameEl.style.textShadow = INVERT ? 'none' : `0 0 24px hsl(${HUE} 70% 60% / 0.24)`;
   themeBtn.textContent = INVERT ? 'dark' : 'light'; // label = the mode you'd switch TO
   strikeEl.style.display = INVERT ? 'none' : '';     // no lightning → no button in light mode
   canvas.style.cursor = 'default'; // crosshair appears only over an armed (hovered) cloud
