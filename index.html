@@ -242,6 +242,9 @@ function rebuildPalette() {
 // z-distance in both directions. Constant per deck — uniform drift, no shear.
 const VORTEX_Z = 5.5;
 const DECK_SPEED = DK.map((p, i) => 1 + 0.8 / (1 + Math.abs(i - VORTEX_Z)));
+// how much of a strike's WHOLE-DECK flash each deck receives: full at the
+// lightning's own z-plane (the vortex plane), fading with z-distance
+const AMB_GAIN = DK.map((p, i) => 1 / (1 + 0.9 * Math.abs(i - VORTEX_Z)));
 
 const DECKS = new Array(DK.length).fill(0);
 function cloudDecks(colN, rowN, tt) {
@@ -500,7 +503,7 @@ function drawFrame(t) {
   }
   // a strike lights the WHOLE cloud deck a little (uniform ambient), on top of
   // the proximity falloff that lights it far more near the bolt itself
-  const AMBIENT = Math.min(0.09, 0.13 * totalGlow);
+  const AMBIENT = Math.min(0.24, 0.32 * totalGlow);
   // the cursor's charge: a small breathing light — local glow only, so it is
   // added AFTER totalGlow and never lifts the whole deck
   if (!INVERT && MX >= 0) lights.push(MX, MY, 0.20 + 0.05 * Math.sin(t * 2.3), 0.75);
@@ -526,12 +529,12 @@ function drawFrame(t) {
     v *= 0.9 + 0.2 * SKY_CHARGE; // the whole sky breathes with the charge, gathering before strikes
     const idx = v > 0.13 ? 3 : v > 0.07 ? 2 : 0.035 < v ? 1 : 0;
     const base = deck * 4 + idx;
-    // lightning adds light ON TOP of the cloud's own shade: AMBIENT lifts the
-    // whole deck, lumAt ramps it toward the strike — brighter cloud + more
-    // light = brighter still, so shading structure is preserved, not flattened.
-    // Scaled by the deck's z-depth gain (p[8]): near decks catch the light
-    // hard, far decks barely — the same parallax rule as the vortex glow.
-    const lum = (lumAt(col, row) + AMBIENT) * DK[deck][8];
+    // lightning adds light ON TOP of the cloud's own shade, in two parts:
+    //  - proximity glow (lumAt), scaled by the deck's viewer-depth gain p[8]
+    //  - whole-deck flash (AMBIENT), scaled by the deck's Z-DISTANCE from the
+    //    lightning's plane — decks adjacent to the bolt light up entirely,
+    //    the deep backdrop barely stirs. That z-falloff IS the 3D read.
+    const lum = lumAt(col, row) * DK[deck][8] + AMBIENT * AMB_GAIN[deck];
     if (lum > 0.04) {
       const litLum = Math.min(205, CLOUD_LUM[base] + Math.min(1, lum) * 165);
       const lv = clamp(Math.round((litLum - 34) / (205 - 34) * (LITN - 1)), 0, LITN - 1);
