@@ -95,6 +95,11 @@
     color: var(--dim); opacity: 0.8;
   }
   #evern { transition: color 0.3s; }
+  #meter {
+    margin: 0.6rem 0 0; font-size: 11px; line-height: 1;
+    letter-spacing: 0.14em; user-select: none; white-space: nowrap;
+  }
+  #mempty { color: var(--rule); transition: color 0.2s; }
   #strike:focus-visible { outline: 1px solid var(--ink); outline-offset: 3px; }
   #strike:active { transform: translateY(1px); }
   #theme {
@@ -137,6 +142,7 @@
     <h1>Frikk Jarl</h1>
     <p class="role" aria-label="Creative Developer"><span id="rolewords" aria-hidden="true">Creative Developer</span><span class="cursor"></span></p>
     <button id="strike" type="button">create lightning</button>
+    <div id="meter" aria-hidden="true" hidden><span id="mfill"></span><span id="mrisk"></span><span id="mhead"></span><span id="mempty"></span></div>
     <p id="ever" aria-live="off" hidden>⚡ <span id="evern">—</span> strikes ever</p>
   </div>
 </div>
@@ -920,6 +926,16 @@ function loop(now) {
     wsPush('cursor', { x: -1, y: 0, hue: HUE, chg: 0 });
   }
   tickEver();
+  // the meter reloads after 2s of chill — fast, with a sparking head
+  if (!INVERT && ENERGY < 1 && performance.now() - LAST_SPEND > 2000) {
+    ENERGY = Math.min(1, ENERGY + 1 / 40);
+  }
+  drawMeter();
+  if (BTN_T0) { // the held button fills with your accent as the charge builds
+    const P = (CHG * 100).toFixed(1);
+    strikeEl.style.background = `linear-gradient(90deg, hsl(${HUE} 60% 42% / 0.9) ${P}%, transparent ${P}%)`;
+    strikeEl.style.color = 'var(--ink)';
+  }
   if (shake > 0) { // a jolt through the storm on strike
     shake--;
     canvas.style.transform = shake
@@ -931,10 +947,29 @@ function loop(now) {
 
 // the button: one mega-bolt per press, spam-friendly (dark mode only)
 const strikeEl = document.getElementById('strike');
-strikeEl.addEventListener('click', () => {
+// the button charges too: hold it and it FILLS with your accent — release to
+// discharge (same charge/energy/volley physics as holding on a cloud)
+let BTN_T0 = 0;
+strikeEl.addEventListener('pointerdown', e => {
+  if (INVERT || e.button > 0) return;
+  BTN_T0 = performance.now();
+  HOLD_T0 = BTN_T0; // the spotlight/meter charge state rides along
+  try { strikeEl.setPointerCapture(e.pointerId); } catch (err) {}
+  e.preventDefault();
+});
+strikeEl.addEventListener('pointerup', () => {
+  if (!BTN_T0) return;
+  const held = (performance.now() - BTN_T0) / 1000;
+  BTN_T0 = 0; HOLD_T0 = 0;
+  strikeEl.style.background = ''; strikeEl.style.color = '';
   if (INVERT) return;
-  const b = spawnBolt(true);
-  if (b) reportStrike(b.lx / COLS, b.ly / ROWS, true);
+  discharge(undefined, held);
+});
+strikeEl.addEventListener('pointercancel', () => { BTN_T0 = 0; HOLD_T0 = 0; strikeEl.style.background = ''; strikeEl.style.color = ''; });
+// keyboard activation (Enter/Space) arrives as a detail-0 click — classic tap
+strikeEl.addEventListener('click', e => {
+  if (INVERT || e.detail !== 0) return;
+  discharge(undefined, 0.05);
 });
 
 // lightning REQUIRES a hovered cloud — and now it CHARGES: press and hold on
@@ -985,6 +1020,71 @@ canvas.addEventListener('mouseup', e => {
 let MX = -1, MY = -1, HOVER_DECK = -1;
 let HOLD_T0 = 0, CHG = 0, SPOT_MUL = 1, SPOT_POW = 1; // hold-to-charge state
 let CUR_LAST = 0, CUR_X = -2, CUR_Y = -2, CUR_CHG = 0, CUR_ON = false; // my presence throttle
+
+// ---------- the lightning meter: strike stamina ----------
+// Strikes DRAIN it (bigger charge = bigger cost); after 2s of chill it
+// reloads fast. Empty = fizzle. Purely local pacing — the server keeps its
+// own rate rails.
+let ENERGY = 1, LAST_SPEND = -1e9, METER_DENY = 0;
+const meterEl = document.getElementById('meter');
+const mfillEl = document.getElementById('mfill');
+const mriskEl = document.getElementById('mrisk');
+const mheadEl = document.getElementById('mhead');
+const memptyEl = document.getElementById('mempty');
+
+function spendEnergy(cost) {
+  if (ENERGY < 0.15) { METER_DENY = 10; return 0; } // tapped out: red flicker, no bolt
+  const spent = Math.min(cost, ENERGY);
+  ENERGY -= spent;
+  LAST_SPEND = performance.now();
+  return spent / cost; // 1 = full-power, <1 = the bar could only partly feed it
+}
+
+const METER_N = 18, SPARK6 = '·+*x$&';
+function drawMeter() {
+  if (INVERT) { meterEl.hidden = true; return; }
+  meterEl.hidden = false;
+  // while holding, the segment the strike WOULD cost flickers — you can see
+  // exactly what you are about to spend
+  const cost = HOLD_T0 ? Math.min(ENERGY, 0.34 + 0.5 * CHG) : 0;
+  const keep = Math.max(0, Math.floor((ENERGY - cost) * METER_N + 1e-6));
+  const risk = Math.floor(ENERGY * METER_N + 1e-6) - keep;
+  const charging = ENERGY < 1 - 1e-6;
+  const headCh = charging && !HOLD_T0 ? SPARK6[Math.floor(Math.random() * 6)] : '';
+  mfillEl.textContent = '&'.repeat(keep);
+  mriskEl.textContent = '&'.repeat(risk);
+  mheadEl.textContent = headCh;
+  memptyEl.textContent = '·'.repeat(Math.max(0, METER_N - keep - risk - (headCh ? 1 : 0)));
+  const full = !charging;
+  mfillEl.style.color = `hsl(${HUE} ${full ? 72 : 55}% ${full ? 66 : 56}%)`;
+  mfillEl.style.textShadow = full
+    ? `0 0 ${9 + 3 * Math.sin(performance.now() / 300)}px hsl(${HUE} 80% 60% / 0.5)` // full: it BREATHES
+    : 'none';
+  mriskEl.style.color = Math.random() < 0.5 ? `hsl(${HUE} 85% 75%)` : `hsl(${HUE} 40% 40%)`;
+  mheadEl.style.color = `hsl(${HUE} 85% 74%)`;
+  memptyEl.style.color = METER_DENY > 0 && (METER_DENY-- , Math.random() < 0.7) ? 'hsl(4 75% 55%)' : '';
+}
+
+// ONE discharge path for canvas release, button release and volley extras —
+// energy-gated, charge-scaled, broadcast to the shared storm
+function discharge(at, held) {
+  const charge = 1 - Math.exp(-held);
+  const eff = spendEnergy(0.34 + 0.5 * charge);
+  if (!eff) return;
+  const c = charge * eff; // a half-fed bar throws a half-power bolt
+  const monster = c > 0.85 || (!at && held < 0.15); // a quick button tap keeps the classic mega
+  const b = spawnBolt(monster, at, undefined, c);
+  if (b) reportStrike(b.lx / COLS, b.ly / ROWS, monster, c);
+  const extras = Math.min(3, Math.max(1, Math.floor(held))) - 1;
+  for (let i = 0; i < extras; i++) {
+    const delay = Math.random() < 0.25 ? 0 : 150 + Math.random() * 850;
+    setTimeout(() => {
+      if (INVERT || !spendEnergy(0.12)) return; // each extra sips the bar too
+      const eb = spawnBolt(monster, undefined, undefined, c);
+      if (eb) reportStrike(eb.lx / COLS, eb.ly / ROWS, monster, c);
+    }, delay);
+  }
+}
 let TRAIL = [], BUZZ = 1; // recent cursor samples [x, y, deck, ...] for the blur trail
 canvas.addEventListener('mousemove', e => {
   const rect = canvas.getBoundingClientRect();
