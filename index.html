@@ -94,6 +94,7 @@
     text-transform: uppercase; letter-spacing: 0.28em;
     color: var(--dim); opacity: 0.8;
   }
+  #evern { transition: color 0.3s; }
   #strike:focus-visible { outline: 1px solid var(--ink); outline-offset: 3px; }
   #strike:active { transform: translateY(1px); }
   #theme {
@@ -918,6 +919,7 @@ function loop(now) {
     CUR_ON = false;
     wsPush('cursor', { x: -1, y: 0, hue: HUE, chg: 0 });
   }
+  tickEver();
   if (shake > 0) { // a jolt through the storm on strike
     shake--;
     canvas.style.transform = shake
@@ -1078,15 +1080,33 @@ const everEl = document.getElementById('ever');
 const evernEl = document.getElementById('evern');
 const MINE = new Set(); // event ids we posted — never re-render our own
 let SEEN = 0, POLL_MS = 3000, EVER_SEEN = false, FIRST_POLL = true;
+let EVER_TARGET = -1, EVER_SHOWN = -1, EVER_GLOW = 0; // the score is an ODOMETER, not a snapshot
 
 function setEver(total) {
   if (typeof total !== 'number') return;
+  EVER_TARGET = Math.max(EVER_TARGET, Math.round(total)); // authoritative totals only move it up
+  if (EVER_SHOWN < 0) EVER_SHOWN = Math.max(0, EVER_TARGET - 12); // roll in on first sight
   EVER_SEEN = true;
-  evernEl.textContent = total.toLocaleString('en-US');
   everEl.hidden = INVERT;
 }
 
+// per-frame odometer: small gaps tick +1 (each tick glows), big catch-ups
+// close exponentially — the score is always MOVING toward truth, never snapping
+function tickEver() {
+  if (EVER_SHOWN >= 0 && EVER_SHOWN < EVER_TARGET) {
+    EVER_SHOWN = Math.min(EVER_TARGET, EVER_SHOWN + Math.max(1, Math.ceil((EVER_TARGET - EVER_SHOWN) * 0.2)));
+    evernEl.textContent = EVER_SHOWN.toLocaleString('en-US');
+    evernEl.style.color = 'var(--ink)';
+    EVER_GLOW = 10;
+  } else if (EVER_GLOW > 0 && --EVER_GLOW === 0) {
+    evernEl.style.color = '';
+  }
+}
+
 function reportStrike(x, y, mega, chg) {
+  // optimistic: YOUR strike moves the score the instant it fires; the server
+  // ack confirms (max wins), a definite failure rolls the tick back
+  if (EVER_TARGET >= 0) EVER_TARGET++;
   if (typeof fetch !== 'function') return;
   try {
     fetch(PULSE + '/events', {
@@ -1098,7 +1118,8 @@ function reportStrike(x, y, mega, chg) {
       }),
     }).then(r => (r.ok ? r.json() : null)).then(d => {
       if (d && d.ok) { MINE.add(d.id); setEver(d.total); }
-    }).catch(() => {});
+      else if (EVER_TARGET > 0) EVER_TARGET = Math.max(EVER_SHOWN, EVER_TARGET - 1);
+    }).catch(() => { if (EVER_TARGET > 0) EVER_TARGET = Math.max(EVER_SHOWN, EVER_TARGET - 1); });
   } catch (e) { /* storm stays local */ }
 }
 
