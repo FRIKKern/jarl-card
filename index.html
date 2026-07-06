@@ -600,7 +600,8 @@ function drawFrame(t) {
       pr.cx += (pr.x - pr.cx) * 0.3;
       pr.cy += (pr.y - pr.cy) * 0.3;
       const mul = pr.chg > 0.02 ? 0.5 + 2.1 * (1 - pr.chg) : 1; // their charge collapse, replicated
-      PEER_ARR.push(pr.cx * COLS, pr.cy * ROWS, pr.hue, mul, 1 + 1.8 * pr.chg);
+      // each cursor buzzes on its OWN random phase — never in sync with yours
+      PEER_ARR.push(pr.cx * COLS, pr.cy * ROWS, pr.hue, mul, 1 + 1.8 * pr.chg, 0.78 + 0.32 * Math.random());
     }
   }
   // hover: which cloud (occlusion-winning deck) is under the cursor right now?
@@ -654,25 +655,36 @@ function drawFrame(t) {
     // hovered cloud: a TINY, razor-sharp electric spotlight — near-full
     // brightness inside a small disc, then a cliff (exp(-h⁴), not a soft
     // Gaussian) — buzzing, with a short motion-blur trail behind the cursor
-    for (let s = 0; s < TRAIL.length; s += 3) {
-      if (TRAIL[s + 2] !== deck) continue;
-      const k = s / 3;
-      const str = 0.55 * SPOT_POW * BUZZ * Math.pow(0.66, k);
-      if (str < 0.04) break;
-      const rr = 1 + 0.12 * k; // older samples spread: the blur
-      const dxh = (col - TRAIL[s]) / COLS, dyv = (row - TRAIL[s + 1]) / ROWS;
-      const hh = (dxh / (0.010 * rr * SPOT_MUL)) ** 2 + (dyv / (0.013 * rr * SPOT_MUL)) ** 2;
-      if (hh < 4) { const add = str * Math.exp(-hh * hh); lum += add; pos += add; if (add > hueAdd) { hueAdd = add; hueBest = HUE; } } // buzz = your color
-    }
-    for (let s = 0; s < PEER_ARR.length; s += 5) { // every visitor's spotlight, their hue
-      const mul = PEER_ARR[s + 3];
-      const dxh = (col - PEER_ARR[s]) / COLS, dyv = (row - PEER_ARR[s + 1]) / ROWS;
-      const hh = (dxh / (0.010 * mul)) ** 2 + (dyv / (0.013 * mul)) ** 2;
-      if (hh < 4) {
-        const add = 0.55 * PEER_ARR[s + 4] * BUZZ * Math.exp(-hh * hh);
-        lum += add; pos += add;
-        if (add > hueAdd) { hueAdd = add; hueBest = PEER_ARR[s + 2]; }
+    // spotlights are IDENTITY, not shared light: each cursor (yours and every
+    // visitor's) is its own discrete spot in its own color — where two overlap
+    // the STRONGER one owns the cell outright; they never pool or blend
+    let spotAdd = 0, spotHue = HUE;
+    {
+      let mine = 0;
+      for (let s = 0; s < TRAIL.length; s += 3) {
+        if (TRAIL[s + 2] !== deck) continue;
+        const k = s / 3;
+        const str = 0.55 * SPOT_POW * BUZZ * Math.pow(0.66, k);
+        if (str < 0.04) break;
+        const rr = 1 + 0.12 * k; // older samples spread: the blur
+        const dxh = (col - TRAIL[s]) / COLS, dyv = (row - TRAIL[s + 1]) / ROWS;
+        const hh = (dxh / (0.010 * rr * SPOT_MUL)) ** 2 + (dyv / (0.013 * rr * SPOT_MUL)) ** 2;
+        if (hh < 4) mine += str * Math.exp(-hh * hh);
       }
+      if (mine > spotAdd) { spotAdd = mine; spotHue = HUE; }
+      for (let s = 0; s < PEER_ARR.length; s += 6) { // each visitor: own spot, own hue, own flicker
+        const mul = PEER_ARR[s + 3];
+        const dxh = (col - PEER_ARR[s]) / COLS, dyv = (row - PEER_ARR[s + 1]) / ROWS;
+        const hh = (dxh / (0.010 * mul)) ** 2 + (dyv / (0.013 * mul)) ** 2;
+        if (hh < 4) {
+          const one = 0.55 * PEER_ARR[s + 4] * PEER_ARR[s + 5] * Math.exp(-hh * hh);
+          if (one > spotAdd) { spotAdd = one; spotHue = PEER_ARR[s + 2]; }
+        }
+      }
+    }
+    if (spotAdd > 0) {
+      lum += spotAdd; pos += spotAdd;
+      if (spotAdd > hueAdd) { hueAdd = spotAdd; hueBest = spotHue; }
     }
     if (lum > 0.035 || lum < -0.035) {
       const bn = CLOUD_LUM[base];
@@ -856,7 +868,7 @@ function drawFrame(t) {
   // peers' crackle tips — each remote cursor sparks in its own hue, harder
   // while its owner is charging (power > 1)
   if (!INVERT) {
-    for (let s = 0; s < PEER_ARR.length; s += 5) {
+    for (let s = 0; s < PEER_ARR.length; s += 6) {
       const n = 2 + Math.round(4 * (PEER_ARR[s + 4] - 1) / 1.8);
       for (let q = 0; q < n; q++) {
         ctx.fillStyle = acH(PEER_ARR[s + 2], 110 + Math.floor(Math.random() * 120), 55);
