@@ -138,17 +138,17 @@
   #powered:focus-visible { outline: 1px solid var(--ink); outline-offset: 3px; }
   #hud {
     position: fixed;
-    left: 1.3rem;
-    top: calc(env(safe-area-inset-top, 0px) + 1.1rem);
+    right: 1.3rem;
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 1.1rem);
     z-index: 3;
     font-size: 10px; line-height: 1.7;
     text-transform: uppercase; letter-spacing: 0.24em;
-    color: var(--dim); opacity: 0.62;
+    color: var(--dim); opacity: 0.62; text-align: right;
     user-select: none; pointer-events: none;
   }
   #hstat { font-variant-numeric: tabular-nums; }
-  #hpeeps { display: flex; align-items: center; gap: 0.5em; margin-top: 0.25em; }
-  #hdots { display: inline-flex; flex-wrap: wrap; gap: 3px; max-width: 150px; }
+  #hpeeps { display: flex; align-items: center; justify-content: flex-end; gap: 0.5em; margin-top: 0.25em; }
+  #hdots { display: inline-flex; flex-wrap: wrap; justify-content: flex-end; gap: 3px; max-width: 150px; }
   #hdots i {
     width: 7px; height: 7px; border-radius: 50%;
     display: inline-block; box-shadow: 0 0 5px currentColor;
