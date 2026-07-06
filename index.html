@@ -116,6 +116,19 @@
   #theme::before { content: "◐ "; }
   #theme:hover { opacity: 1; color: var(--ink); }
   #theme:focus-visible { outline: 1px solid var(--ink); outline-offset: 3px; }
+  #powered {
+    position: fixed;
+    left: 1.3rem;
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 1.1rem);
+    z-index: 3;
+    font-size: 10px;
+    text-transform: uppercase; letter-spacing: 0.28em;
+    color: var(--dim); text-decoration: none;
+    opacity: 0.55; transition: opacity 0.15s, color 0.15s;
+  }
+  #powered strong { font-weight: 600; color: inherit; }
+  #powered:hover { opacity: 1; color: var(--ink); }
+  #powered:focus-visible { outline: 1px solid var(--ink); outline-offset: 3px; }
   .stage { position: fixed; inset: 0; }
   canvas { position: absolute; inset: 0; }
   #flash { position: fixed; inset: 0; background: #fff; opacity: 0; pointer-events: none; }
@@ -147,6 +160,7 @@
   </div>
 </div>
 <button id="theme" type="button" aria-label="Toggle light or dark theme"></button>
+<a id="powered" href="https://barkpark.cloud" target="_blank" rel="noopener">powered by <strong>barkpark</strong> realtime</a>
 <div class="stage"><canvas id="c" aria-hidden="true"></canvas></div>
 <div id="flash" aria-hidden="true"></div>
 
