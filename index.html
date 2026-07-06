@@ -113,7 +113,10 @@
     padding: 0.15em 0.75em; border: 1px solid currentColor; border-radius: 3px;
     border-bottom-width: 2px; opacity: 0.75; transform: translateY(-1px);
   }
-  #strike.charging .key { background: currentColor; color: var(--bg); opacity: 1; }
+  /* charging: the keycap looks pressed but stays fully legible — a filled key
+     in the theme base shade against the inverted button face (never the
+     button's own text colour, which would make it vanish) */
+  #strike.charging .key { background: var(--bg); color: var(--ink); border-color: var(--bg); opacity: 1; }
   #ever {
     margin: 0.55rem 0 0; font-size: 10px;
     text-transform: uppercase; letter-spacing: 0.28em;
