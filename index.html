@@ -89,6 +89,13 @@
     transition: color 0.15s, border-color 0.15s, background 0.15s;
   }
   #strike:hover { color: var(--bg); background: var(--ink); border-color: var(--ink); }
+  #strike .key {
+    display: inline-block; margin-left: 0.7em;
+    font-size: 0.82em; letter-spacing: 0.12em;
+    padding: 0.15em 0.75em; border: 1px solid currentColor; border-radius: 3px;
+    border-bottom-width: 2px; opacity: 0.75; transform: translateY(-1px);
+  }
+  #strike.charging .key { background: currentColor; color: var(--bg); opacity: 1; }
   #ever {
     margin: 0.55rem 0 0; font-size: 10px;
     text-transform: uppercase; letter-spacing: 0.28em;
@@ -129,6 +136,24 @@
   #powered strong { font-weight: 600; color: inherit; }
   #powered:hover { opacity: 1; color: var(--ink); }
   #powered:focus-visible { outline: 1px solid var(--ink); outline-offset: 3px; }
+  #hud {
+    position: fixed;
+    left: 1.3rem;
+    top: calc(env(safe-area-inset-top, 0px) + 1.1rem);
+    z-index: 3;
+    font-size: 10px; line-height: 1.7;
+    text-transform: uppercase; letter-spacing: 0.24em;
+    color: var(--dim); opacity: 0.62;
+    user-select: none; pointer-events: none;
+  }
+  #hstat { font-variant-numeric: tabular-nums; }
+  #hpeeps { display: flex; align-items: center; gap: 0.5em; margin-top: 0.25em; }
+  #hdots { display: inline-flex; flex-wrap: wrap; gap: 3px; max-width: 150px; }
+  #hdots i {
+    width: 7px; height: 7px; border-radius: 50%;
+    display: inline-block; box-shadow: 0 0 5px currentColor;
+  }
+  #hdots i.me { outline: 1px solid var(--ink); outline-offset: 1px; }
   .stage { position: fixed; inset: 0; }
   canvas { position: absolute; inset: 0; }
   #flash { position: fixed; inset: 0; background: #fff; opacity: 0; pointer-events: none; }
@@ -154,13 +179,17 @@
     <div class="rule"></div>
     <h1>Frikk Jarl</h1>
     <p class="role" aria-label="Creative Developer"><span id="rolewords" aria-hidden="true">Creative Developer</span><span class="cursor"></span></p>
-    <button id="strike" type="button">create lightning</button>
+    <button id="strike" type="button">create lightning <kbd class="key">space</kbd></button>
     <div id="meter" aria-hidden="true" hidden><span id="mfill"></span><span id="mrisk"></span><span id="mhead"></span><span id="mempty"></span></div>
     <p id="ever" aria-live="off" hidden>⚡ <span id="evern">—</span> strikes ever</p>
   </div>
 </div>
 <button id="theme" type="button" aria-label="Toggle light or dark theme"></button>
 <a id="powered" href="https://barkpark.cloud" target="_blank" rel="noopener">powered by <strong>barkpark</strong> realtime</a>
+<div id="hud" aria-hidden="true" hidden>
+  <div id="hstat"><span id="hping">—</span> · <span id="hfps">—</span></div>
+  <div id="hpeeps"><span id="hdots"></span><span id="hcount"></span></div>
+</div>
 <div class="stage"><canvas id="c" aria-hidden="true"></canvas></div>
 <div id="flash" aria-hidden="true"></div>
 
@@ -297,6 +326,17 @@ function rebuildPalette() {
 // z-distance in both directions. Constant per deck — uniform drift, no shear.
 const VORTEX_Z = FRONT_START - 0.5; // the vortex plane sits between decks 10 and 11
 const DECK_SPEED = DK.map((p, i) => 1 + 0.8 / (1 + Math.abs(i - VORTEX_Z) * ZS));
+// perspective for the cursor spotlight: a spot on a NEAR deck (front scud,
+// high index) is large; on a FAR deck (deep back haze, low index) it shrinks
+// like distance — the spotlight reads as living at the cloud's own depth.
+const DEPTH_SCALE = DK.map((p, i) => lerp(0.40, 1.15, i / (NDECKS - 1)));
+// nearest visible deck under a cell (the occlusion winner), or -1 if bare sky
+function winDeckAt(col, row) {
+  if (row / ROWS >= 0.66) return -1;
+  const D = cloudDecks(col / COLS, row / ROWS, t);
+  for (let i = D.length - 1; i >= 0; i--) if (D[i] > 0.012) return i;
+  return -1;
+}
 
 const DECKS = new Array(DK.length).fill(0);
 function cloudDecks(colN, rowN, tt) {
@@ -614,8 +654,11 @@ function drawFrame(t) {
       pr.cx += (pr.x - pr.cx) * 0.3;
       pr.cy += (pr.y - pr.cy) * 0.3;
       const mul = pr.chg > 0.02 ? 0.5 + 2.1 * (1 - pr.chg) : 1; // their charge collapse, replicated
+      // a peer's spot sits at its cloud's depth too — small when they hover far
+      const pd = winDeckAt(Math.round(pr.cx * COLS), Math.round(pr.cy * ROWS));
+      const pdsc = pd >= 0 ? DEPTH_SCALE[pd] : 0.8;
       // each cursor buzzes on its OWN random phase — never in sync with yours
-      PEER_ARR.push(pr.cx * COLS, pr.cy * ROWS, pr.hue, mul, 1 + 1.8 * pr.chg, 0.78 + 0.32 * Math.random());
+      PEER_ARR.push(pr.cx * COLS, pr.cy * ROWS, pr.hue, mul, 1 + 1.8 * pr.chg, 0.78 + 0.32 * Math.random(), pdsc);
     }
   }
   // hover: which cloud (occlusion-winning deck) is under the cursor right now?
@@ -674,24 +717,25 @@ function drawFrame(t) {
     // the STRONGER one owns the cell outright; they never pool or blend
     let spotAdd = 0, spotHue = HUE;
     {
+      const dsc = DEPTH_SCALE[deck]; // this deck's perspective size (near big, far small)
       let mine = 0;
       for (let s = 0; s < TRAIL.length; s += 3) {
         if (TRAIL[s + 2] !== deck) continue;
         const k = s / 3;
-        const str = 0.55 * SPOT_POW * BUZZ * Math.pow(0.66, k);
+        const str = 0.55 * SPOT_POW * BUZZ * Math.pow(0.66, k) * (0.78 + 0.28 * dsc); // far = a touch dimmer
         if (str < 0.04) break;
         const rr = 1 + 0.12 * k; // older samples spread: the blur
         const dxh = (col - TRAIL[s]) / COLS, dyv = (row - TRAIL[s + 1]) / ROWS;
-        const hh = (dxh / (0.010 * rr * SPOT_MUL)) ** 2 + (dyv / (0.013 * rr * SPOT_MUL)) ** 2;
+        const hh = (dxh / (0.010 * rr * SPOT_MUL * dsc)) ** 2 + (dyv / (0.013 * rr * SPOT_MUL * dsc)) ** 2;
         if (hh < 4) mine += str * Math.exp(-hh * hh);
       }
       if (mine > spotAdd) { spotAdd = mine; spotHue = HUE; }
-      for (let s = 0; s < PEER_ARR.length; s += 6) { // each visitor: own spot, own hue, own flicker
-        const mul = PEER_ARR[s + 3];
+      for (let s = 0; s < PEER_ARR.length; s += 7) { // each visitor: own spot, own hue, own flicker, own depth
+        const mul = PEER_ARR[s + 3], pdsc = PEER_ARR[s + 6];
         const dxh = (col - PEER_ARR[s]) / COLS, dyv = (row - PEER_ARR[s + 1]) / ROWS;
-        const hh = (dxh / (0.010 * mul)) ** 2 + (dyv / (0.013 * mul)) ** 2;
+        const hh = (dxh / (0.010 * mul * pdsc)) ** 2 + (dyv / (0.013 * mul * pdsc)) ** 2;
         if (hh < 4) {
-          const one = 0.55 * PEER_ARR[s + 4] * PEER_ARR[s + 5] * Math.exp(-hh * hh);
+          const one = 0.55 * PEER_ARR[s + 4] * PEER_ARR[s + 5] * (0.78 + 0.28 * pdsc) * Math.exp(-hh * hh);
           if (one > spotAdd) { spotAdd = one; spotHue = PEER_ARR[s + 2]; }
         }
       }
@@ -865,8 +909,10 @@ function drawFrame(t) {
   // the cursor tip itself: tiny crackle glyphs jittering at the point (the
   // static-electric buzz), plus fading embers along the recent path
   if (!INVERT && MX >= 0) {
-    // charging: sparks start scattered wide and collapse inward with the spot
-    const nCr = 3 + Math.round(6 * CHG), rCr = HOLD_T0 ? 0.7 + 2.0 * (1 - CHG) : 0.8;
+    // charging: sparks start scattered wide and collapse inward with the spot;
+    // and they hug tighter when the hovered cloud is far away (perspective)
+    const hdsc = HOVER_DECK >= 0 ? DEPTH_SCALE[HOVER_DECK] : 1;
+    const nCr = 3 + Math.round(6 * CHG), rCr = (HOLD_T0 ? 0.7 + 2.0 * (1 - CHG) : 0.8) * hdsc;
     for (let s = 0; s < nCr; s++) {
       ctx.fillStyle = ac(120 + Math.floor(Math.random() * 135), 55);
       ctx.fillText('·+*x'[Math.floor(Math.random() * 4)],
@@ -882,13 +928,13 @@ function drawFrame(t) {
   // peers' crackle tips — each remote cursor sparks in its own hue, harder
   // while its owner is charging (power > 1)
   if (!INVERT) {
-    for (let s = 0; s < PEER_ARR.length; s += 6) {
-      const n = 2 + Math.round(4 * (PEER_ARR[s + 4] - 1) / 1.8);
+    for (let s = 0; s < PEER_ARR.length; s += 7) {
+      const n = 2 + Math.round(4 * (PEER_ARR[s + 4] - 1) / 1.8), rC = 0.9 * PEER_ARR[s + 6];
       for (let q = 0; q < n; q++) {
         ctx.fillStyle = acH(PEER_ARR[s + 2], 110 + Math.floor(Math.random() * 120), 55);
         ctx.fillText('·+*x'[Math.floor(Math.random() * 4)],
-          (PEER_ARR[s] + (Math.random() - 0.5) * 0.9) * cellW,
-          (PEER_ARR[s + 1] + (Math.random() - 0.5) * 0.9) * cellH);
+          (PEER_ARR[s] + (Math.random() - 0.5) * rC) * cellW,
+          (PEER_ARR[s + 1] + (Math.random() - 0.5) * rC) * cellH);
       }
     }
   }
@@ -904,6 +950,10 @@ const still = matchMedia('(prefers-reduced-motion: reduce)').matches;
 function loop(now) {
   requestAnimationFrame(loop);
   if (now - last < FRAME) return;
+  // fps: smoothed from the real inter-frame gap (before the frozen-motion bail)
+  if (last) { const inst = 1000 / Math.max(1, now - last); FPS = FPS ? FPS * 0.9 + inst * 0.1 : inst; }
+  // refresh the HUD stats ~4x/sec (roster redraws on its own presence events)
+  if (now - HUD_LAST > 250) { HUD_LAST = now; renderHud(false); }
   // reduced motion: the storm stays frozen, but a requested strike still plays out
   if (still && !bolts.length && !shake) return;
   last = now;
@@ -980,6 +1030,7 @@ strikeEl.addEventListener('pointerdown', e => {
   if (INVERT || e.button > 0) return;
   BTN_T0 = performance.now();
   HOLD_T0 = BTN_T0; // the spotlight/meter charge state rides along
+  strikeEl.classList.add('charging');
   try { strikeEl.setPointerCapture(e.pointerId); } catch (err) {}
   e.preventDefault();
 });
@@ -987,11 +1038,35 @@ strikeEl.addEventListener('pointerup', () => {
   if (!BTN_T0) return;
   const held = (performance.now() - BTN_T0) / 1000;
   BTN_T0 = 0; HOLD_T0 = 0;
+  strikeEl.classList.remove('charging');
   strikeEl.style.background = ''; strikeEl.style.color = '';
   if (INVERT) return;
   discharge(undefined, held);
 });
-strikeEl.addEventListener('pointercancel', () => { BTN_T0 = 0; HOLD_T0 = 0; strikeEl.style.background = ''; strikeEl.style.color = ''; });
+strikeEl.addEventListener('pointercancel', () => { BTN_T0 = 0; HOLD_T0 = 0; strikeEl.classList.remove('charging'); strikeEl.style.background = ''; strikeEl.style.color = ''; });
+
+// SPACEBAR charges lightning from anywhere — hold to build, release to strike
+// (a random cloud, like the button). preventDefault on down AND up cancels the
+// focused button's native space-activation so it never double-fires.
+let SPACE_DOWN = false;
+addEventListener('keydown', e => {
+  if (e.code !== 'Space' && e.key !== ' ') return;
+  e.preventDefault();
+  if (e.repeat || INVERT || SPACE_DOWN || HOLD_T0 || BTN_T0) return;
+  SPACE_DOWN = true;
+  BTN_T0 = HOLD_T0 = performance.now(); // fills the button + charges the meter/spotlight
+  strikeEl.classList.add('charging');
+});
+addEventListener('keyup', e => {
+  if ((e.code !== 'Space' && e.key !== ' ') || !SPACE_DOWN) return;
+  e.preventDefault();
+  SPACE_DOWN = false;
+  const held = (performance.now() - BTN_T0) / 1000;
+  BTN_T0 = HOLD_T0 = 0;
+  strikeEl.classList.remove('charging');
+  strikeEl.style.background = ''; strikeEl.style.color = '';
+  if (!INVERT) discharge(undefined, held);
+});
 // keyboard activation (Enter/Space) arrives as a detail-0 click — classic tap
 strikeEl.addEventListener('click', e => {
   if (INVERT || e.detail !== 0) return;
@@ -1252,6 +1327,47 @@ function renderRemote(ev) {
 // ---------- realtime: WebSocket first (Phoenix channel wire), poll as net ----
 let WS_ALIVE = false, wsRef = 0, wsHb = 0, WS = null;
 const PEERS = {};    // sid → live remote cursor {x,y,hue,chg,ts,cx,cy}
+const ROSTER = {};   // sid → hue: EVERYONE present (idle included), from Presence
+let MY_SID = null, PING = -1, FPS = 0, HUD_LAST = 0;
+const PING_SENT = {}; // ref → send time, for RTT
+const hudEl = document.getElementById('hud');
+const hpingEl = document.getElementById('hping');
+const hfpsEl = document.getElementById('hfps');
+const hdotsEl = document.getElementById('hdots');
+const hcountEl = document.getElementById('hcount');
+
+// pull the hue out of a Presence meta list (first meta wins)
+function rosterFromMetas(entry) {
+  const m = entry && entry.metas && entry.metas[0];
+  return m && typeof m.hue === 'number' ? m.hue : 0;
+}
+function applyPresenceState(state) {
+  for (const k in ROSTER) delete ROSTER[k];
+  for (const sid in state) ROSTER[sid] = rosterFromMetas(state[sid]);
+  renderHud(true);
+}
+function applyPresenceDiff(diff) {
+  if (diff.joins) for (const sid in diff.joins) ROSTER[sid] = rosterFromMetas(diff.joins[sid]);
+  if (diff.leaves) for (const sid in diff.leaves) delete ROSTER[sid];
+  renderHud(true);
+}
+
+function renderHud(roster) {
+  if (INVERT) { hudEl.hidden = true; return; }
+  hudEl.hidden = false;
+  hpingEl.textContent = PING >= 0 ? PING + 'ms' : '—';
+  hfpsEl.textContent = (FPS ? Math.round(FPS) : '—') + 'fps';
+  if (roster) {
+    const sids = Object.keys(ROSTER);
+    // you first, then the rest — a dot per person in their own colour
+    sids.sort((a, b) => (a === MY_SID ? -1 : b === MY_SID ? 1 : 0));
+    const shown = sids.slice(0, 14);
+    hdotsEl.innerHTML = shown.map(sid =>
+      `<i class="${sid === MY_SID ? 'me' : ''}" style="color:hsl(${ROSTER[sid]} 75% 60%)"></i>`).join('');
+    const extra = sids.length - shown.length;
+    hcountEl.textContent = sids.length + (sids.length === 1 ? ' here' : ' here') + (extra > 0 ? ` (+${extra})` : '');
+  }
+}
 const PEER_ARR = []; // per-frame flat [col,row,hue,sizeMul,power,...] for the cloud pass
 function wsPush(event, payload) {
   if (!WS_ALIVE || !WS) return;
@@ -1266,18 +1382,33 @@ function wsConnect() {
   WS = ws;
   ws.onopen = () => {
     WS_ALIVE = true;
-    ws.send(JSON.stringify(['1', String(++wsRef), 'pulse:jarl-card', 'phx_join', {}]));
+    const jref = String(++wsRef);
+    PING_SENT[jref] = performance.now();
+    ws.send(JSON.stringify(['1', jref, 'pulse:jarl-card', 'phx_join', { hue: HUE }]));
     clearInterval(wsHb);
-    wsHb = setInterval(() => {
-      try { ws.send(JSON.stringify([null, String(++wsRef), 'phoenix', 'heartbeat', {}])); } catch (e) {}
-    }, 30000);
+    const beat = () => {
+      const ref = String(++wsRef);
+      PING_SENT[ref] = performance.now();
+      try { ws.send(JSON.stringify([null, ref, 'phoenix', 'heartbeat', {}])); } catch (e) {}
+    };
+    beat();
+    wsHb = setInterval(beat, 4000); // heartbeat doubles as the ping probe
   };
   ws.onmessage = m => {
     let f; try { f = JSON.parse(m.data); } catch (e) { return; }
-    const topic = f[2], evName = f[3], pl = f[4];
+    const ref = f[1], topic = f[2], evName = f[3], pl = f[4];
+    // ping: any reply whose ref we timed (heartbeats + the join) measures RTT
+    if (evName === 'phx_reply' && ref != null && PING_SENT[ref] != null) {
+      PING = Math.max(0, Math.round(performance.now() - PING_SENT[ref]));
+      delete PING_SENT[ref];
+    }
     if (topic !== 'pulse:jarl-card') return;
-    if (evName === 'phx_reply' && pl && pl.status === 'ok' && pl.response &&
-        typeof pl.response.total === 'number') setEver(pl.response.total);
+    if (evName === 'phx_reply' && pl && pl.status === 'ok' && pl.response) {
+      if (typeof pl.response.total === 'number') setEver(pl.response.total);
+      if (pl.response.sid) MY_SID = pl.response.sid; // now I can mark myself in the roster
+    }
+    if (evName === 'presence_state') applyPresenceState(pl || {});
+    if (evName === 'presence_diff') applyPresenceDiff(pl || {});
     if (evName === 'strike') renderRemote(pl);
     if (evName === 'cursor' && pl && pl.sid) { // a peer's charged presence
       if (pl.x < 0) delete PEERS[pl.sid];
@@ -1285,7 +1416,12 @@ function wsConnect() {
         { x: pl.x, y: pl.y, hue: pl.hue || 0, chg: pl.chg || 0, ts: Date.now() });
     }
   };
-  ws.onclose = () => { WS_ALIVE = false; clearInterval(wsHb); setTimeout(wsConnect, 4000 + Math.random() * 6000); };
+  ws.onclose = () => {
+    WS_ALIVE = false; PING = -1;
+    for (const k in ROSTER) delete ROSTER[k];
+    renderHud(true);
+    clearInterval(wsHb); setTimeout(wsConnect, 4000 + Math.random() * 6000);
+  };
   ws.onerror = () => { try { ws.close(); } catch (e) {} };
 }
 try { wsConnect(); } catch (e) { /* storm stays local */ }
