@@ -177,6 +177,46 @@
   .stage { position: fixed; inset: 0; }
   canvas { position: absolute; inset: 0; }
   #flash { position: fixed; inset: 0; background: #fff; opacity: 0; pointer-events: none; }
+  /* the landing gate: a clean white screen you press SPACE to leave, dropping
+     into the dark storm behind it */
+  #intro {
+    position: fixed; inset: 0; z-index: 20;
+    background: #f3f2ef; color: #141414;
+    display: flex; align-items: center; justify-content: center;
+    transition: opacity 0.7s ease;
+  }
+  #intro.gone { opacity: 0; pointer-events: none; }
+  .introbox { display: flex; flex-direction: column; align-items: center; gap: 2.2rem; padding: 0 8vw; }
+  .introname {
+    margin: 0; font-size: clamp(2.2rem, 6vw, 4rem); font-weight: 500; letter-spacing: 0.02em;
+  }
+  #enter {
+    font: inherit; font-size: 13px;
+    text-transform: uppercase; letter-spacing: 0.34em;
+    color: #141414; background: #f3f2ef;
+    border: 1px solid #141414; border-radius: 5px;
+    padding: 1.1em 1.8em 1.1em 2.1em; cursor: pointer;
+    box-shadow: 0 5px 0 -1px #c9c7c0, 0 7px 10px -3px rgba(0,0,0,0.25);
+    transform: translateY(0);
+    transition: transform 0.12s cubic-bezier(0.3,1.5,0.6,1), box-shadow 0.12s cubic-bezier(0.3,1.5,0.6,1),
+                color 0.13s, background 0.13s;
+  }
+  #enter:hover {
+    color: #f3f2ef; background: #141414;
+    transform: translateY(-1px); box-shadow: 0 7px 0 -1px #141414, 0 10px 12px -3px rgba(0,0,0,0.3);
+  }
+  #enter:active, #enter.charging {
+    transform: translateY(6px);
+    box-shadow: 0 0 0 -1px #141414, 0 0 0 0 rgba(0,0,0,0);
+    transition: transform 0.04s ease-out, box-shadow 0.04s ease-out, color 0.13s, background 0.13s;
+  }
+  #enter .key {
+    display: inline-block; margin-left: 0.8em; font-size: 0.82em; letter-spacing: 0.12em;
+    padding: 0.15em 0.8em; border: 1px solid currentColor; border-radius: 3px;
+    border-bottom-width: 2px; opacity: 0.75; transform: translateY(-1px);
+  }
+  #enter.charging .key { background: #f3f2ef; color: #141414; border-color: #f3f2ef; opacity: 1; }
+  #enter:focus-visible { outline: 1px solid #141414; outline-offset: 3px; }
   /* Phones, portrait: the funnel bends around the name */
   @media (max-width: 760px) and (orientation: portrait) {
     .card {
@@ -212,6 +252,12 @@
 </div>
 <div class="stage"><canvas id="c" aria-hidden="true"></canvas></div>
 <div id="flash" aria-hidden="true"></div>
+<div id="intro">
+  <div class="introbox">
+    <p class="introname">Frikk Jarl</p>
+    <button id="enter" type="button">enter the storm <kbd class="key">space</kbd></button>
+  </div>
+</div>
 
 <script>
 'use strict';
@@ -1069,16 +1115,33 @@ strikeEl.addEventListener('pointercancel', () => { BTN_T0 = 0; HOLD_T0 = 0; stri
 // (a random cloud, like the button). preventDefault on down AND up cancels the
 // focused button's native space-activation so it never double-fires.
 let SPACE_DOWN = false;
+// ---------- the landing gate ----------
+// A white screen; press SPACE (or the button) to enter the dark storm behind it.
+let INTRO = true;
+const introEl = document.getElementById('intro');
+const enterEl = document.getElementById('enter');
+function enterStorm() {
+  if (!INTRO) return;
+  INTRO = false;
+  document.documentElement.setAttribute('data-theme', 'dark'); // into the storm (observer → readTheme)
+  introEl.classList.add('gone');
+  setTimeout(() => { introEl.style.display = 'none'; }, 800);
+}
+enterEl.addEventListener('click', enterStorm);
+
 addEventListener('keydown', e => {
   if (e.code !== 'Space' && e.key !== ' ') return;
   e.preventDefault();
+  if (INTRO) { if (!e.repeat) enterEl.classList.add('charging'); return; } // gate: space presses ENTER
   if (e.repeat || INVERT || SPACE_DOWN || HOLD_T0 || BTN_T0) return;
   SPACE_DOWN = true;
   BTN_T0 = HOLD_T0 = performance.now(); // fills the button + charges the meter/spotlight
   strikeEl.classList.add('charging');
 });
 addEventListener('keyup', e => {
-  if ((e.code !== 'Space' && e.key !== ' ') || !SPACE_DOWN) return;
+  if (e.code !== 'Space' && e.key !== ' ') return;
+  if (INTRO) { e.preventDefault(); enterEl.classList.remove('charging'); enterStorm(); return; }
+  if (!SPACE_DOWN) return;
   e.preventDefault();
   SPACE_DOWN = false;
   const held = (performance.now() - BTN_T0) / 1000;
