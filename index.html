@@ -257,15 +257,14 @@ let CLOUD_C = []; // themed cloud colors, rebuilt on theme change
 const LITN = 24; // finer + wider: near-black silhouette up to white-hot
 const LIT_LUM = Array.from({ length: LITN }, (_, k) => Math.round(lerp(4, 230, k / (LITN - 1))));
 const LIT_CH = Array.from({ length: LITN }, (_, k) => RAMP[clamp(Math.round(lerp(4, 18, k / (LITN - 1))), 1, N - 1)]);
-let LIT_C = [], LIT_CA = []; // white ramp (ambient strikes) + accent ramp (YOUR strikes/buzz)
+let LIT_C = []; // white lit ramp (ambient); hued lighting renders per-hue via acH
 
 // rebuild every canvas color for the current theme (dark = as authored,
 // light = luminance-flipped to ink-on-paper)
 function rebuildPalette() {
   COLORS = COLOR_LUM.map(g);
   CLOUD_C = CLOUD_LUM.map(g);
-  LIT_C = LIT_LUM.map(g);              // ambient lightning lights clouds WHITE
-  LIT_CA = LIT_LUM.map(v => ac(v, 42)); // your strikes/buzz: gentle accent glow
+  LIT_C = LIT_LUM.map(g); // ambient lightning lights clouds WHITE; hued light via acH per bin
   DUST = g(DUST_LUM);
 }
 
@@ -511,7 +510,7 @@ function spawnBolt(mega, at, remoteHue, charge = 0) {
     cells, strokes, age: 0,
     life: strokes[strokes.length - 1] + (mega ? 13 : 9) + Math.round(6 * charge) + Math.floor(Math.random() * 5),
     endCol: col, endRow: row,
-    boost: (remoteHue != null ? 0.8 : mega ? 1.6 : 1) * (1 + 1.1 * charge), // remote: ghosted; held: mightier
+    boost: (mega ? 1.6 : 1) * (1 + 1.1 * charge), // remote strikes replicate the sender's exact strength
     lx: cells.length ? cells[0] : col,
     ly: cells.length ? cells[1] : startRow,
     rscale: (mega ? 1.8 : 1) * (1 + 0.9 * charge),
@@ -521,7 +520,7 @@ function spawnBolt(mega, at, remoteHue, charge = 0) {
     hue: remoteHue != null ? remoteHue : mega || at ? HUE : null,
   };
   bolts.push(bolt);
-  shake = Math.max(shake, Math.round((mega ? 9 : remoteHue != null ? 3 : 5) + 5 * charge));
+  shake = Math.max(shake, Math.round((mega ? 9 : 5) + 5 * charge));
   return bolt;
 }
 
@@ -572,15 +571,30 @@ function drawFrame(t) {
   SPOT_POW = 1 + 1.8 * CHG + 0.35 * CHG * (Math.random() - 0.5); // hotter + more nervous
   const buckets = Array.from({ length: N }, () => []);
   const dust = [];
-  const clouds = Array.from({ length: CBASE + LITN * 2 }, () => []); // + white-lit + accent-lit buckets
+  const clouds = Array.from({ length: CBASE + LITN }, () => []); // + white-lit buckets
+  const hued = {}; // hue-binned lit clouds: key = hueBin(15°) * LITN + level — ANY visitor's color
   // hot bolts (and sheet flashes) light the cloud decks — each light knows
   // which DECK it was born in, so lighting can be depth-aware
-  const lights = []; // stride 6: col, row, glow, rscale, sourceDeck, tinted
+  const lights = []; // stride 6: col, row, glow, rscale, sourceDeck, hue (-1 = white ambient)
   for (const bolt of bolts) {
     if (bolt.age >= bolt.life) continue;
     bolt.bright = boltBright(bolt) * (0.92 + Math.random() * 0.08); // tiny jitter — "occasionally wrong"
     const glow = bolt.boost * bolt.bright;
-    if (glow > 0.05) lights.push(bolt.lx, bolt.ly, glow, bolt.rscale || 1, bolt.deck ?? VORTEX_Z, bolt.hue === HUE ? 1 : 0);
+    if (glow > 0.05) lights.push(bolt.lx, bolt.ly, glow, bolt.rscale || 1, bolt.deck ?? VORTEX_Z, bolt.hue ?? -1);
+  }
+  // live peers: ease each remote cursor toward its last reported spot, drop
+  // the silent (their spotlight + crackle render exactly like the local one)
+  PEER_ARR.length = 0;
+  {
+    const nowP = Date.now();
+    for (const sid in PEERS) {
+      const pr = PEERS[sid];
+      if (nowP - pr.ts > 4000) { delete PEERS[sid]; continue; }
+      pr.cx += (pr.x - pr.cx) * 0.3;
+      pr.cy += (pr.y - pr.cy) * 0.3;
+      const mul = pr.chg > 0.02 ? 0.5 + 2.1 * (1 - pr.chg) : 1; // their charge collapse, replicated
+      PEER_ARR.push(pr.cx * COLS, pr.cy * ROWS, pr.hue, mul, 1 + 1.8 * pr.chg);
+    }
   }
   // hover: which cloud (occlusion-winning deck) is under the cursor right now?
   // That cloud gets a ~10% lift, and only a hovered cloud can be struck.
@@ -608,7 +622,7 @@ function drawFrame(t) {
     //     distance from the strike
     //  3. cloak: decks IN FRONT of the bolt are backlit — they darken into
     //     silhouette instead of brightening
-    let lum = 0, pos = 0, posT = 0; // pos/posT: total vs YOUR-strike positive light
+    let lum = 0, pos = 0, hueAdd = 0, hueBest = -1; // strongest COLORED light wins the cell's tint
     for (let L = 0; L < lights.length; L += 6) {
       const glow = lights[L + 2], rs = lights[L + 3], bd = lights[L + 4];
       const dxh = (col - lights[L]) / COLS;
@@ -627,7 +641,8 @@ function drawFrame(t) {
         else add += 0.92 * glow * spread / (1 + 0.85 * Math.abs(dz));
       }
       lum += add; pos += add;
-      if (lights[L + 5]) posT += add;
+      const lh = lights[L + 5];
+      if (lh >= 0 && add > hueAdd) { hueAdd = add; hueBest = lh; }
     }
     // hovered cloud: a TINY, razor-sharp electric spotlight — near-full
     // brightness inside a small disc, then a cliff (exp(-h⁴), not a soft
@@ -640,7 +655,17 @@ function drawFrame(t) {
       const rr = 1 + 0.12 * k; // older samples spread: the blur
       const dxh = (col - TRAIL[s]) / COLS, dyv = (row - TRAIL[s + 1]) / ROWS;
       const hh = (dxh / (0.010 * rr * SPOT_MUL)) ** 2 + (dyv / (0.013 * rr * SPOT_MUL)) ** 2;
-      if (hh < 4) { const add = str * Math.exp(-hh * hh); lum += add; pos += add; posT += add; } // buzz = your color
+      if (hh < 4) { const add = str * Math.exp(-hh * hh); lum += add; pos += add; if (add > hueAdd) { hueAdd = add; hueBest = HUE; } } // buzz = your color
+    }
+    for (let s = 0; s < PEER_ARR.length; s += 5) { // every visitor's spotlight, their hue
+      const mul = PEER_ARR[s + 3];
+      const dxh = (col - PEER_ARR[s]) / COLS, dyv = (row - PEER_ARR[s + 1]) / ROWS;
+      const hh = (dxh / (0.010 * mul)) ** 2 + (dyv / (0.013 * mul)) ** 2;
+      if (hh < 4) {
+        const add = 0.55 * PEER_ARR[s + 4] * BUZZ * Math.exp(-hh * hh);
+        lum += add; pos += add;
+        if (add > hueAdd) { hueAdd = add; hueBest = PEER_ARR[s + 2]; }
+      }
     }
     if (lum > 0.035 || lum < -0.035) {
       const bn = CLOUD_LUM[base];
@@ -654,8 +679,14 @@ function drawFrame(t) {
       if (lum > 0 && bn > 14 && lift < minPush) lift = minPush;
       const litLum = clamp(Math.round(bn + lift), 4, 230);
       const lv = clamp(Math.round((litLum - 4) / (230 - 4) * (LITN - 1)), 0, LITN - 1);
-      // accent only where YOUR light dominates; ambient strikes stay white
-      clouds[CBASE + (posT * 2 > pos ? LITN + lv : lv)].push(col, row);
+      // color only where a HUED light dominates; ambient strikes stay white.
+      // Each visitor's hue lights the clouds exactly like yours does.
+      if (hueAdd * 2 > pos && hueBest >= 0) {
+        const key = (Math.round(hueBest / 15) % 24) * LITN + lv;
+        (hued[key] || (hued[key] = [])).push(col, row);
+      } else {
+        clouds[CBASE + lv].push(col, row);
+      }
     } else {
       clouds[base].push(col, row);
     }
@@ -717,12 +748,14 @@ function drawFrame(t) {
       const ch = LIT_CH[lv];
       for (let i = 0; i < cells.length; i += 2) ctx.fillText(ch, cells[i] * cellW, cells[i + 1] * cellH);
     }
-    const acc = clouds[CBASE + LITN + lv]; // cells lit by YOUR strike/buzz: accent
-    if (acc.length) {
-      ctx.fillStyle = LIT_CA[lv];
-      const ch = LIT_CH[lv];
-      for (let i = 0; i < acc.length; i += 2) ctx.fillText(ch, acc[i] * cellW, acc[i + 1] * cellH);
-    }
+  }
+  for (const key in hued) { // cells lit by SOMEONE's color — yours or any visitor's
+    const cells = hued[key];
+    if (!cells.length) continue;
+    const k = +key, lv = k % LITN, bin = (k - lv) / LITN;
+    ctx.fillStyle = acH(bin * 15, LIT_LUM[lv], 42);
+    const ch = LIT_CH[lv];
+    for (let i = 0; i < cells.length; i += 2) ctx.fillText(ch, cells[i] * cellW, cells[i + 1] * cellH);
   }
   ctx.fillStyle = DUST;
   for (let i = 0; i < dust.length; i += 2) ctx.fillText('·', dust[i] * cellW, dust[i + 1] * cellH);
@@ -813,6 +846,19 @@ function drawFrame(t) {
       ctx.fillText('·', TRAIL[s] * cellW, TRAIL[s + 1] * cellH);
     }
   }
+  // peers' crackle tips — each remote cursor sparks in its own hue, harder
+  // while its owner is charging (power > 1)
+  if (!INVERT) {
+    for (let s = 0; s < PEER_ARR.length; s += 5) {
+      const n = 2 + Math.round(4 * (PEER_ARR[s + 4] - 1) / 1.8);
+      for (let q = 0; q < n; q++) {
+        ctx.fillStyle = acH(PEER_ARR[s + 2], 110 + Math.floor(Math.random() * 120), 55);
+        ctx.fillText('·+*x'[Math.floor(Math.random() * 4)],
+          (PEER_ARR[s] + (Math.random() - 0.5) * 0.9) * cellW,
+          (PEER_ARR[s + 1] + (Math.random() - 0.5) * 0.9) * cellH);
+      }
+    }
+  }
   if (flash > 0.02) // ambient flash: white. Your strike's flash: a pale wash of your accent
     flashEl.style.background = INVERT ? '#0a0a0a' : flashT != null ? `hsl(${flashT} 55% 88%)` : '#ffffff';
   flashEl.style.opacity = flash > 0.02 ? ((INVERT ? 0.16 : 0.22) * flash).toFixed(3) : 0;
@@ -858,6 +904,20 @@ function loop(now) {
     TRAIL.unshift(MX + (Math.random() - 0.5) * 0.35, MY + (Math.random() - 0.5) * 0.35, HOVER_DECK);
     if (TRAIL.length > 24) TRAIL.length = 24;
   } else if (TRAIL.length) TRAIL.length = 0;
+  // broadcast MY charged cursor to the shared storm (throttled; armed only)
+  const nms = performance.now();
+  if (WS_ALIVE && !INVERT && MX >= 0 && (HOVER_DECK >= 0 || HOLD_T0)) {
+    const cx = clamp(MX / COLS, 0, 1), cy = clamp(MY / ROWS, 0, 1);
+    if (nms - CUR_LAST > 120 &&
+        (Math.abs(cx - CUR_X) > 0.004 || Math.abs(cy - CUR_Y) > 0.006 ||
+         Math.abs(CHG - CUR_CHG) > 0.03 || nms - CUR_LAST > 600)) {
+      CUR_LAST = nms; CUR_X = cx; CUR_Y = cy; CUR_CHG = CHG; CUR_ON = true;
+      wsPush('cursor', { x: cx, y: cy, hue: HUE, chg: Math.round(CHG * 100) / 100 });
+    }
+  } else if (CUR_ON) {
+    CUR_ON = false;
+    wsPush('cursor', { x: -1, y: 0, hue: HUE, chg: 0 });
+  }
   if (shake > 0) { // a jolt through the storm on strike
     shake--;
     canvas.style.transform = shake
@@ -922,6 +982,7 @@ canvas.addEventListener('mouseup', e => {
 // vanishes entirely — the electric spotlight + crackle IS the cursor there
 let MX = -1, MY = -1, HOVER_DECK = -1;
 let HOLD_T0 = 0, CHG = 0, SPOT_MUL = 1, SPOT_POW = 1; // hold-to-charge state
+let CUR_LAST = 0, CUR_X = -2, CUR_Y = -2, CUR_CHG = 0, CUR_ON = false; // my presence throttle
 let TRAIL = [], BUZZ = 1; // recent cursor samples [x, y, deck, ...] for the blur trail
 canvas.addEventListener('mousemove', e => {
   const rect = canvas.getBoundingClientRect();
@@ -1016,7 +1077,7 @@ const PULSE = 'https://guerrilla.barkpark.cloud/v1/plugins/pulse/jarl-card';
 const everEl = document.getElementById('ever');
 const evernEl = document.getElementById('evern');
 const MINE = new Set(); // event ids we posted — never re-render our own
-let CURSOR = 0, POLL_MS = 3000, EVER_SEEN = false, FIRST_POLL = true;
+let SEEN = 0, POLL_MS = 3000, EVER_SEEN = false, FIRST_POLL = true;
 
 function setEver(total) {
   if (typeof total !== 'number') return;
@@ -1025,47 +1086,101 @@ function setEver(total) {
   everEl.hidden = INVERT;
 }
 
-function reportStrike(x, y, mega) {
+function reportStrike(x, y, mega, chg) {
   if (typeof fetch !== 'function') return;
   try {
     fetch(PULSE + '/events', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ hue: HUE, x: clamp(x, 0, 1), y: clamp(y, 0, 1), mega: !!mega }),
+      body: JSON.stringify({
+        hue: HUE, x: clamp(x, 0, 1), y: clamp(y, 0, 1), mega: !!mega,
+        chg: Math.round(clamp(chg || 0, 0, 1) * 1000) / 1000, // full strength travels with the strike
+      }),
     }).then(r => (r.ok ? r.json() : null)).then(d => {
       if (d && d.ok) { MINE.add(d.id); setEver(d.total); }
     }).catch(() => {});
   } catch (e) { /* storm stays local */ }
 }
 
+// one renderer for a remote strike, whatever transport delivered it — an
+// EXACT replica: their position, their hue, their mega, their charge
+function renderRemote(ev) {
+  if (!ev || (ev.id && ev.id <= SEEN)) return;
+  if (ev.id) SEEN = Math.max(SEEN, ev.id); // advance PAST our own too, or the poll refetches them forever
+  if (typeof ev.total === 'number') setEver(ev.total);
+  if (MINE.has(ev.id)) return; // ours: counted, never echoed back
+  const P = ev.payload;
+  if (!P || INVERT || bolts.length > 7) return;
+  spawnBolt(!!P.mega, {
+    col: clamp(Math.round(P.x * COLS), 1, COLS - 2),
+    row: clamp(Math.round(P.y * ROWS), 0, ROWS - 2),
+  }, clamp(Math.round(P.hue ?? 0), 0, 359), clamp(P.chg ?? 0, 0, 1));
+}
+
+// ---------- realtime: WebSocket first (Phoenix channel wire), poll as net ----
+let WS_ALIVE = false, wsRef = 0, wsHb = 0, WS = null;
+const PEERS = {};    // sid → live remote cursor {x,y,hue,chg,ts,cx,cy}
+const PEER_ARR = []; // per-frame flat [col,row,hue,sizeMul,power,...] for the cloud pass
+function wsPush(event, payload) {
+  if (!WS_ALIVE || !WS) return;
+  try { WS.send(JSON.stringify(['1', String(++wsRef), 'pulse:jarl-card', event, payload])); } catch (e) {}
+}
+function wsConnect() {
+  if (typeof WebSocket !== 'function') return;
+  let ws;
+  try {
+    ws = new WebSocket(PULSE.replace(/^http/, 'ws').replace(/\/pulse\/jarl-card$/, '/pulse/socket/websocket?vsn=2.0.0'));
+  } catch (e) { return; }
+  WS = ws;
+  ws.onopen = () => {
+    WS_ALIVE = true;
+    ws.send(JSON.stringify(['1', String(++wsRef), 'pulse:jarl-card', 'phx_join', {}]));
+    clearInterval(wsHb);
+    wsHb = setInterval(() => {
+      try { ws.send(JSON.stringify([null, String(++wsRef), 'phoenix', 'heartbeat', {}])); } catch (e) {}
+    }, 30000);
+  };
+  ws.onmessage = m => {
+    let f; try { f = JSON.parse(m.data); } catch (e) { return; }
+    const topic = f[2], evName = f[3], pl = f[4];
+    if (topic !== 'pulse:jarl-card') return;
+    if (evName === 'phx_reply' && pl && pl.status === 'ok' && pl.response &&
+        typeof pl.response.total === 'number') setEver(pl.response.total);
+    if (evName === 'strike') renderRemote(pl);
+    if (evName === 'cursor' && pl && pl.sid) { // a peer's charged presence
+      if (pl.x < 0) delete PEERS[pl.sid];
+      else PEERS[pl.sid] = Object.assign(PEERS[pl.sid] || { cx: pl.x, cy: pl.y },
+        { x: pl.x, y: pl.y, hue: pl.hue || 0, chg: pl.chg || 0, ts: Date.now() });
+    }
+  };
+  ws.onclose = () => { WS_ALIVE = false; clearInterval(wsHb); setTimeout(wsConnect, 4000 + Math.random() * 6000); };
+  ws.onerror = () => { try { ws.close(); } catch (e) {} };
+}
+try { wsConnect(); } catch (e) { /* storm stays local */ }
+
 function pollStorm() {
   if (typeof fetch !== 'function') return;
   if (INVERT || document.hidden) { setTimeout(pollStorm, 4000); return; } // idle: paper mode / hidden tab
-  fetch(PULSE + '/recent?since=' + CURSOR)
+  fetch(PULSE + '/recent?since=' + SEEN)
     .then(r => (r.ok ? r.json() : Promise.reject(0)))
     .then(d => {
       POLL_MS = 3000; // healthy again
       const first = FIRST_POLL; FIRST_POLL = false;
-      CURSOR = d.next ?? CURSOR;
       setEver(d.total);
-      if (!first && Array.isArray(d.events)) {
-        d.events
-          .filter(e => !MINE.has(e.id) && e.payload)
-          .slice(0, 4) // a burst of visitors never becomes a strobe
-          .forEach((e, i) => setTimeout(() => {
-            if (INVERT || bolts.length > 7) return;
-            const P = e.payload;
-            spawnBolt(!!P.mega, {
-              col: clamp(Math.round(P.x * COLS), 1, COLS - 2),
-              row: clamp(Math.round(P.y * ROWS), 0, ROWS - 2),
-            }, clamp(Math.round(P.hue ?? 0), 0, 359));
-          }, i * 650)); // spread them out — distinct events, not one blast
+      if (first) {
+        SEEN = d.next ?? SEEN; // don't replay history on load
+      } else if (Array.isArray(d.events)) {
+        // renderRemote advances SEEN per event as the stagger fires — never
+        // pre-bump it from d.next here, that would suppress those renders
+        d.events.slice(0, 4).forEach((e, i) => setTimeout(() => renderRemote(e), i * 650));
       }
-      setTimeout(pollStorm, POLL_MS);
+      // the socket is the realtime transport; polling idles to a slow safety
+      // sync while it's alive and snaps back to 3s the moment it drops
+      setTimeout(pollStorm, WS_ALIVE ? 30000 : POLL_MS);
     })
     .catch(() => {
       POLL_MS = Math.min(60000, POLL_MS * 2); // quiet exponential backoff
-      setTimeout(pollStorm, POLL_MS);
+      setTimeout(pollStorm, WS_ALIVE ? 30000 : POLL_MS);
     });
 }
 try { pollStorm(); } catch (e) { /* storm stays local */ }
