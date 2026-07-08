@@ -1042,8 +1042,11 @@ function drawFrame(t) {
     }
   }
   if (flash > 0.02) // ambient flash: white. Your strike's flash: a pale wash of your accent
-    flashEl.style.background = INVERT ? '#0a0a0a' : flashT != null ? `hsl(${flashT} 55% 88%)` : '#ffffff';
-  flashEl.style.opacity = flash > 0.02 ? ((INVERT ? 0.16 : 0.22) * flash).toFixed(3) : 0;
+    // the sky-flash is CHILL and CARRIES THE THUNDER'S COLOR: a deep, properly
+    // saturated wash of the striking bolt's hue at low opacity — atmosphere,
+    // not a strobe. Colorless (ambient/sheet) thunder stays a faint white.
+    flashEl.style.background = INVERT ? '#0a0a0a' : flashT != null ? `hsl(${flashT} 80% 58%)` : '#ffffff';
+  flashEl.style.opacity = flash > 0.02 ? ((INVERT ? 0.06 : flashT != null ? 0.11 : 0.08) * flash).toFixed(3) : 0;
 }
 
 // ---------- 30 fps loop ----------
