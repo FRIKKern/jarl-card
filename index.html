@@ -854,10 +854,47 @@ function drawFrame(t) {
         for (let i = NDECKS - 1; i >= FRONT_START; i--) if (D[i] > TH) { fi = i; break; }
         if (fi >= 0) { pushCloud(fi, D[fi], col, row); continue; }
       }
-      const d = density(xN, y, t);
+      // ── the vortex is SIX sheets, not one skin ──────────────────────
+      // a slow swirl-phase noise slices the column into 6 depth sheets that
+      // turn with the funnel: sheet 0 = the back of the column, 5 = facing
+      // you. Each sheet gets its own z, its own slight time-skew (the sheets
+      // slide across each other — internal parallax), its own shading, and
+      // the storm's light lands on each by z-distance.
+      const vl = Math.min(5, Math.floor(noise(xN * 5.2 + 9.7, y * 3.1 - t * 0.55) * 6));
+      const d = density(xN, y, t + (vl - 2.5) * 0.16);
       if (d > 0.02) {
-        const idx = clamp(Math.floor(Math.pow(d, 1.25) * N), 1, N - 1);
-        buckets[idx].push(col, row);
+        const vz = VORTEX_Z + (vl - 2.5) * 0.9; // this sheet's own depth (deck units)
+        // self-shadowing: the back of the column runs darker, the facing sheet brighter
+        let bIdx = Math.pow(d, 1.25) * N + (vl - 2.5) * 0.55;
+        let lum = 0, pos = 0, hueAdd = 0, hueBest = -1;
+        for (let L = 0; L < lights.length; L += 6) {
+          const glow = lights[L + 2], rs = lights[L + 3], bd = lights[L + 4];
+          const dxh = (col - lights[L]) / COLS, dyv = (row - lights[L + 1]) / ROWS;
+          const dz = (vz - bd) * ZS;
+          let add = 0;
+          const d2 = (dxh / (0.16 * rs)) ** 2 + (dyv / (0.11 * rs)) ** 2;
+          if (d2 < 9) add += 0.8 * glow * Math.exp(-d2) / (1 + 0.5 * Math.abs(dz));
+          const h2 = (dxh / 0.34) ** 2 + (dyv / 0.40) ** 2;
+          if (h2 < 9) add += 0.45 * glow * Math.exp(-h2 * 0.8) / (1 + 0.8 * Math.abs(dz));
+          if (add > 0) {
+            lum += add; pos += add;
+            const lh = lights[L + 5];
+            if (lh >= 0 && add > hueAdd) { hueAdd = add; hueBest = lh; }
+          }
+        }
+        if (lum > 0.04) {
+          if (hueAdd * 2 > pos && hueBest >= 0 && lum > 0.1) {
+            // a dominant COLORED light: this funnel cell glows in the striker's hue
+            const base = COLOR_LUM[clamp(Math.floor(bIdx), 1, N - 1)];
+            const litLum = clamp(Math.round(base + clamp(lum, 0, 1) * 150), 4, 230);
+            const lv2 = clamp(Math.round((litLum - 4) / (230 - 4) * (LITN - 1)), 0, LITN - 1);
+            const key = (Math.round(hueBest / 15) % 24) * LITN + lv2;
+            (hued[key] || (hued[key] = [])).push(col, row);
+            continue;
+          }
+          bIdx += clamp(lum, 0, 1) * (N * 0.55); // white light: the sheet brightens up the ramp
+        }
+        buckets[clamp(Math.round(bIdx), 1, N - 1)].push(col, row);
         continue;
       }
       if (D) { // background decks, closest-first occlusion
