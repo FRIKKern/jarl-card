@@ -258,7 +258,7 @@
 <button id="theme" type="button" aria-label="Toggle light or dark theme"></button>
 <div id="poweredbox">
   <a id="powered" href="https://barkpark.cloud" target="_blank" rel="noopener">powered by <strong>barkpark</strong> realtime</a>
-  <div id="cost" hidden>this storm costs <strong id="costeur">—</strong> · cpu <span id="costcpu">—</span> · <span id="costrows">—</span> strikes stored</div>
+  <div id="cost" hidden>this storm costs <strong id="costeur">—</strong> · <strong id="costsofar">—</strong> so far · cpu <span id="costcpu">—</span> · <span id="costrows">—</span> strikes stored</div>
 </div>
 <div id="hud" aria-hidden="true" hidden>
   <div id="hstat"><span id="hping">—</span> · <span id="hfps">—</span></div>
@@ -1496,10 +1496,12 @@ const costEl = document.getElementById('cost');
 const costEurEl = document.getElementById('costeur');
 const costCpuEl = document.getElementById('costcpu');
 const costRowsEl = document.getElementById('costrows');
+const costSoFarEl = document.getElementById('costsofar');
 function renderCost(v) {
   if (typeof v.eur !== 'number') return;
   costEl.hidden = INVERT;
   costEurEl.textContent = '≈ €' + v.eur.toFixed(4) + '/mo';
+  if (typeof v.eur_total === 'number') costSoFarEl.textContent = '€' + v.eur_total.toFixed(6);
   costCpuEl.textContent = (v.cpu * 100).toFixed(1) + '%';
   costRowsEl.textContent = (v.rows ?? 0).toLocaleString('en-US');
 }
